@@ -2,7 +2,8 @@ import 'dotenv/config';
 import { fetchNewsList, fetchEventDetail, sleep } from './src/fetcher.js';
 import { getExistingIds, upsertEvents } from './src/db.js';
 import { extractTextFromImage } from './src/ocr.js';
-import { extractBodyImageUrls, parseEventPeriod } from './src/parser.js';
+import { extractBodyImageUrls, extractBodyText } from './src/parser.js';
+import { extractEventPeriodWithAI } from './src/ai.js';
 
 const THROTTLE_MS = 500;
 const OCR_LIMIT = 2;
@@ -37,35 +38,28 @@ async function main() {
     }
   }
 
-  // 4. 상위 2개 항목에만 OCR 수행, 나머지는 event_period = null
-  const ocrTargetIds = new Set(
-    newDetails.slice(0, OCR_LIMIT).map((d) => String(d.id))
-  );
-
+  // 4. 각 이벤트마다 다중 계층 추출로 날짜 파싱
   const rows = [];
   for (const detail of newDetails) {
     const id = String(detail.id);
-    const isOcrTarget = ocrTargetIds.has(id);
-
+    const bodyHtml = detail.body ?? '';
     let event_period = null;
 
-    if (isOcrTarget) {
-      const bodyUrls = extractBodyImageUrls(detail.body ?? '');
-      // body 이미지가 없으면 썸네일로 대체
-      const imageUrl = bodyUrls[0] ?? detail.imageThumbnail ?? null;
+    // 1계층: HTML 텍스트 → AI 정제 1차 시도
+    const bodyText = extractBodyText(bodyHtml);
+    event_period = await extractEventPeriodWithAI(bodyText);
 
-      if (imageUrl) {
-        const text = await extractTextFromImage(imageUrl);
-        event_period = parseEventPeriod(text);
-        console.log(
-          `[main] id=${id} → period="${event_period ?? 'not found'}"`
-        );
-      } else {
-        console.log(`[main] id=${id} → no image available for OCR`);
+    if (!event_period) {
+      // 2계층: 이미지 상위 2장 OCR → AI 정제 2차 시도
+      const candidates = extractBodyImageUrls(bodyHtml).slice(0, OCR_LIMIT);
+      for (const imageUrl of candidates) {
+        const ocrText = await extractTextFromImage(imageUrl);
+        event_period = await extractEventPeriodWithAI(ocrText);
+        if (event_period) break;
       }
-    } else {
-      console.log(`[main] id=${id} → OCR skipped (over limit)`);
     }
+
+    console.log(`[main] id=${id} → period="${event_period ?? 'not found'}"`);
 
     rows.push({
       id,

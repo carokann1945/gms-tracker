@@ -8,6 +8,8 @@
   "dependencies": {
     "@google-cloud/vision": "^4.3.2",
     "@supabase/supabase-js": "^2.49.4",
-    "dotenv": "^16.4.7"
+    "cheerio": "^1.2.0",
+    "dotenv": "^16.4.7",
+    "openai": "^6.33.0"
   }
 }
