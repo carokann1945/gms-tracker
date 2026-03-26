@@ -92,6 +92,46 @@ export async function fetchNewsList() {
 }
 
 /**
+ * KMS 이벤트 전체 목록을 스크래핑하여 반환한다.
+ * Ongoing 이벤트(단일 페이지) + Closed 이벤트(페이지네이션, 최대 20페이지)를 합산.
+ * GMS는 KMS 대비 ~6개월 지연이므로 최대 20페이지(~1-2년치)까지 조회한다.
+ * 에러 발생 시 throw하지 않고 그 시점까지 수집된 배열을 반환한다.
+ * @returns {Promise<Array<{id: string, name: string}>>}
+ */
+export async function fetchKmsEventList() {
+  const events = [];
+  try {
+    // 1. Ongoing events (단일 페이지 — 페이지네이션 불필요)
+    const ongoingHtml = await fetchKmsPage(
+      'https://maplestory.nexon.com/News/Event/Ongoing'
+    );
+    events.push(...parseOngoingEvents(ongoingHtml));
+    console.log(`[fetcher] KMS ongoing: ${events.length} events`);
+
+    // 2. Closed events (빈 페이지 감지 또는 최대 20페이지 도달 시 중단)
+    // 20페이지 × 500ms throttle = ~10초, IP 차단 안전 범위
+    let page = 1;
+    while (page <= 20) {
+      await sleep(500); // Nexon 서버 보호용 throttle
+      const html = await fetchKmsPage(
+        `https://maplestory.nexon.com/News/Event/Closed?page=${page}`
+      );
+      const pageEvents = parseClosedEvents(html);
+      if (pageEvents.length === 0) break;
+      events.push(...pageEvents);
+      console.log(`[fetcher] KMS closed page ${page}: ${pageEvents.length} events`);
+      page++;
+    }
+  } catch (err) {
+    console.error('[fetcher] fetchKmsEventList error:', err.message);
+    // 에러 이전까지 수집된 이벤트 반환 (graceful degradation)
+  }
+
+  console.log(`[fetcher] KMS total: ${events.length} events`);
+  return events;
+}
+
+/**
  * 단일 이벤트 상세 API를 호출하여 상세 데이터를 반환한다.
  * @param {string} id
  * @returns {Promise<object | null>}
