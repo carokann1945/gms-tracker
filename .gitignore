@@ -1,0 +1,30 @@
+# === 의존성 ===
+node_modules/
+.pnpm-store/
+
+# === 환경변수 및 시크릿 (매우 중요) ===
+.env
+.env.local
+.env.development
+.env.production
+google-credentials.json
+*.pem
+
+# === 임시 파일 (OCR 이미지 다운로드용) ===
+temp/
+downloads/
+uploads/
+
+# === 빌드 및 테스트 ===
+/build
+/coverage
+
+# === 로그 ===
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# === OS 및 에디터 임시 파일 ===
+.DS_Store
+Thumbs.db
+.vscode/

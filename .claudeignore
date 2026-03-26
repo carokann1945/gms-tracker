@@ -1,0 +1,53 @@
+# === 의존성 / 빌드 ===
+node_modules/
+.pnpm-store/
+.next/
+out/
+dist/
+build/
+
+# === 환경변수 · 시크릿 ===
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+
+# === 테스트 · 커버리지 ===
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+
+# === 캐시 · 임시파일 ===
+.turbo/
+.cache/
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# === 자동생성 파일 ===
+src/generated/
+src/__generated__/
+prisma/migrations/
+*.generated.ts
+
+# === 미디어 · 에셋 ===
+public/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.ico
+*.mp4
+*.mp3
+
+# === 문서 · 로그 ===
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# === 에디터 및 OS 임시 파일 ===
+.vscode/
+.idea/
+.DS_Store
