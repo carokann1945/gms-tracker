@@ -20,6 +20,25 @@ async function fetchKmsPage(url) {
   return res.text();
 }
 
+/**
+ * KMS Ongoing 이벤트 페이지 HTML을 파싱하여 이벤트 목록을 반환한다.
+ * 셀렉터: dt a[href] — /News/Event/{id} 패턴만 매칭 (Closed 링크 및 내비게이션 제외).
+ * @param {string} html
+ * @returns {Array<{id: string, name: string}>}
+ */
+function parseOngoingEvents(html) {
+  const $ = load(html);
+  const events = [];
+  $('dt a[href]').each((i, el) => {
+    const href = $(el).attr('href');
+    const match = href?.match(/^\/News\/Event\/(\d+)$/);
+    if (!match) return;
+    const title = $(el).text().replace(/\s+/g, ' ').trim();
+    if (title) events.push({ id: match[1], name: title });
+  });
+  return events;
+}
+
 export function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
