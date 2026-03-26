@@ -1,3 +1,5 @@
+import { load } from 'cheerio';
+
 const NEWS_LIST_URL = 'https://g.nexonstatic.com/maplestory/cms/v1/news';
 const NEWS_DETAIL_URL = 'https://g.nexonstatic.com/maplestory/cms/v1/news';
 
