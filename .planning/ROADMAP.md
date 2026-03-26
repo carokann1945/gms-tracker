@@ -39,7 +39,7 @@
 **Goal:** The pipeline finds and stores the matching KMS event URL for each new GMS event, falling back to `null` when no confident match is found.
 
 **Plans:**
-- 2.1 KMS scraper — Implement `fetchKmsEventList()` in `src/fetcher.js` to paginate through all pages of `maplestory.nexon.com/News/Event` and return `[{ id, name }]`
+2/3 plans executed
 - 2.2 GPT translation + match — Implement `findKmsUrl(gmsEventName)` in `src/matcher.js`: translate name to Korean via GPT-4o-mini, call `fetchKmsEventList()`, ask GPT to pick the best match, return full KMS URL or `null`
 
 **Requirements covered:** URL-02
@@ -57,7 +57,7 @@
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Schema & GMS URL | 0/2 | Not started | - |
-| 2. KMS URL Matching | 0/2 | Not started | - |
+| 2. KMS URL Matching | 2/3 | In Progress|  |
 
 ---
 
