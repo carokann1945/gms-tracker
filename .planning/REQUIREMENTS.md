@@ -1,0 +1,60 @@
+# Requirements: GMS Tracker
+
+**Defined:** 2026-03-27
+**Core Value:** 수동 개입 없이 GMS 이벤트 데이터를 항상 최신 상태로 DB에 유지한다.
+
+## v1 Requirements
+
+### URL 저장
+
+- [ ] **URL-01**: 각 이벤트의 GMS 공식 상세 페이지 URL을 `gms_url` 컬럼에 저장한다.
+  - 형식: `https://www.nexon.com/maplestory/news/events/{id}/{slug}`
+  - slug 생성 규칙: name에서 영문자/숫자만 유지, 소문자, 공백→하이픈, 연속 하이픈 collapse
+- [ ] **URL-02**: 대응하는 KMS 이벤트 페이지 URL을 `kms_url` 컬럼에 저장한다.
+  - GPT-4o-mini로 GMS 이벤트명을 한글로 번역
+  - `maplestory.nexon.com/News/Event` 전체 페이지를 순회하여 이벤트 목록 수집
+  - 번역된 이름과 가장 유사한 KMS 이벤트를 GPT로 매칭
+  - 매칭 실패 시 `null` 처리
+- [ ] **URL-03**: Supabase `events` 테이블에 `gms_url` (text), `kms_url` (text, nullable) 컬럼을 추가한다.
+
+### 기존 파이프라인 유지
+
+- [ ] **PIPE-01**: 기존 이벤트 기간 추출 파이프라인(텍스트 → AI → OCR fallback)이 그대로 동작한다.
+- [ ] **PIPE-02**: Nexon API 호출 간 500ms throttle이 유지된다.
+- [ ] **PIPE-03**: 신규 이벤트에만 처리가 수행된다 (idempotency 유지).
+
+## v2 Requirements
+
+### 기능 확장 (미래 고려)
+
+- **EXT-01**: 이미 DB에 있는 이벤트의 `kms_url`이 null인 경우 재시도 메커니즘
+- **EXT-02**: KMS 이벤트 목록 캐싱으로 API 호출 최소화
+
+## Out of Scope
+
+| Feature | Reason |
+|---------|--------|
+| 알림/노티피케이션 시스템 | 현재 milestone 외 |
+| 웹 대시보드 | 현재 milestone 외 |
+| KMS 이벤트 직접 수집 | 현재 milestone 외 |
+| GMS 외 타 서버 지원 | 현재 milestone 외 |
+
+## Traceability
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| URL-01 | Phase 1 | Pending |
+| URL-02 | Phase 1 | Pending |
+| URL-03 | Phase 1 | Pending |
+| PIPE-01 | Phase 1 | Pending |
+| PIPE-02 | Phase 1 | Pending |
+| PIPE-03 | Phase 1 | Pending |
+
+**Coverage:**
+- v1 requirements: 6 total
+- Mapped to phases: 6
+- Unmapped: 0
+
+---
+*Requirements defined: 2026-03-27*
+*Last updated: 2026-03-27 after initialization*
