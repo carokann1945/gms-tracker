@@ -1,5 +1,6 @@
 import 'dotenv/config';
-import { fetchNewsList, fetchEventDetail, sleep } from './src/fetcher.js';
+import { fetchNewsList, fetchEventDetail, sleep, fetchKmsEventList } from './src/fetcher.js';
+import { findKmsUrl } from './src/matcher.js';
 import { getExistingIds, upsertEvents } from './src/db.js';
 import { extractTextFromImage } from './src/ocr.js';
 import { extractBodyImageUrls, extractBodyText, buildGmsUrl } from './src/parser.js';
