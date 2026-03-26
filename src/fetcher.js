@@ -39,6 +39,27 @@ function parseOngoingEvents(html) {
   return events;
 }
 
+/**
+ * KMS Closed 이벤트 페이지 HTML을 파싱하여 이벤트 목록을 반환한다.
+ * 셀렉터: dd.data em.event_listMt — 사이드바 Ongoing 이벤트 혼입 방지.
+ * dt a 셀렉터는 Closed 페이지 사이드바(21개)를 혼합시키므로 사용 금지 (Pitfall 1).
+ * @param {string} html
+ * @returns {Array<{id: string, name: string}>}
+ */
+function parseClosedEvents(html) {
+  const $ = load(html);
+  const events = [];
+  $('dd.data').each((i, el) => {
+    const link = $(el).find('a[href*="/News/Event/Closed/"]').first();
+    const href = link.attr('href');
+    const match = href?.match(/\/News\/Event\/Closed\/(\d+)/);
+    if (!match) return;
+    const title = $(el).find('em.event_listMt').text().replace(/\s+/g, ' ').trim();
+    if (title) events.push({ id: match[1], name: title });
+  });
+  return events;
+}
+
 export function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
