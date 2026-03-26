@@ -71,12 +71,15 @@ async function main() {
     console.log(`[main] id=${id} → period="${event_period ?? 'not found'}"`);
 
     const eventName = detail.name ?? detail.title ?? '';
+    const kms_url = await findKmsUrl(eventName, kmsList);
+
     rows.push({
       id,
       name: eventName,
       image_url: detail.imageThumbnail ?? null,
       event_period,
       gms_url: buildGmsUrl(id, eventName),
+      kms_url,
     });
   }
 
