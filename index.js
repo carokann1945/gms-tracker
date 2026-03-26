@@ -29,6 +29,9 @@ async function main() {
 
   console.log(`[main] ${newItems.length} new item(s) to process`);
 
+  // ★ KMS 이벤트 목록을 루프 전 1회 로드
+  const kmsList = await fetchKmsEventList();
+
   // 3. 신규 항목 상세 API 순차 호출 (0.5초 throttle)
   const newDetails = [];
   for (const item of newItems) {
