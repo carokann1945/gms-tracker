@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { fetchNewsList, fetchEventDetail, sleep } from './src/fetcher.js';
 import { getExistingIds, upsertEvents } from './src/db.js';
 import { extractTextFromImage } from './src/ocr.js';
-import { extractBodyImageUrls, extractBodyText } from './src/parser.js';
+import { extractBodyImageUrls, extractBodyText, buildGmsUrl } from './src/parser.js';
 import { extractEventPeriodWithAI } from './src/ai.js';
 
 const THROTTLE_MS = 500;
@@ -66,11 +66,13 @@ async function main() {
 
     console.log(`[main] id=${id} → period="${event_period ?? 'not found'}"`);
 
+    const eventName = detail.name ?? detail.title ?? '';
     rows.push({
       id,
-      name: detail.name ?? detail.title ?? '',
+      name: eventName,
       image_url: detail.imageThumbnail ?? null,
       event_period,
+      gms_url: buildGmsUrl(id, eventName),
     });
   }
 

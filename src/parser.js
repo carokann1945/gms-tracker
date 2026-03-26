@@ -37,3 +37,21 @@ export function extractBodyImageUrls(bodyHtml) {
 
   return urls;
 }
+
+/**
+ * GMS 이벤트 상세 페이지 URL을 생성한다.
+ * @param {string|number} id
+ * @param {string} name
+ * @returns {string}
+ */
+export function buildGmsUrl(id, name) {
+  const slug = name
+    .replace(/[^a-zA-Z0-9 ]/g, ' ') // non-alphanumeric (except space) → space
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')            // runs of whitespace → single hyphen
+    .replace(/-+/g, '-')             // collapse consecutive hyphens
+    .replace(/^-|-$/g, '');          // strip leading/trailing hyphens
+
+  return `https://www.nexon.com/maplestory/news/events/${id}/${slug}`;
+}
