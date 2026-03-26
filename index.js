@@ -32,9 +32,11 @@ async function main() {
   const newDetails = [];
   for (const item of newItems) {
     await sleep(THROTTLE_MS);
-    const detail = await fetchEventDetail(item.id);
-    if (detail) {
-      newDetails.push(detail);
+    try {
+      const detail = await fetchEventDetail(item.id);
+      if (detail) newDetails.push(detail);
+    } catch (err) {
+      console.error(`[main] Failed to fetch detail for id=${item.id}:`, err.message);
     }
   }
 
@@ -50,12 +52,15 @@ async function main() {
     event_period = await extractEventPeriodWithAI(bodyText);
 
     if (!event_period) {
-      // 2계층: 이미지 상위 2장 OCR → AI 정제 2차 시도
+      // 2계층: 이미지 상위 2장 OCR 텍스트를 합쳐서 AI에 1회만 질의
       const candidates = extractBodyImageUrls(bodyHtml).slice(0, OCR_LIMIT);
+      const ocrTexts = [];
       for (const imageUrl of candidates) {
         const ocrText = await extractTextFromImage(imageUrl);
-        event_period = await extractEventPeriodWithAI(ocrText);
-        if (event_period) break;
+        if (ocrText) ocrTexts.push(ocrText);
+      }
+      if (ocrTexts.length) {
+        event_period = await extractEventPeriodWithAI(ocrTexts.join('\n\n'));
       }
     }
 
