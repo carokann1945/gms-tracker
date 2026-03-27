@@ -2,9 +2,9 @@ name: GMS Event Tracker
 
 on:
   schedule:
-    - cron: '0 1 * * *'   # 매일 오전 10시 KST (UTC 01:00)
-    - cron: '0 13 * * *'  # 매일 오후 10시 KST (UTC 13:00)
-  workflow_dispatch:        # 수동 실행 버튼
+    - cron: "16 0 * * *" # 매일 오전 9시 16분 KST (UTC 00:16)
+    - cron: "16 9 * * *" # 매일 오후 6시 16분 KST (UTC 09:16)
+  workflow_dispatch: # 수동 실행 버튼
 
 jobs:
   run-tracker:
@@ -19,7 +19,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: "24"
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
