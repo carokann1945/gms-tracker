@@ -3,7 +3,7 @@ name: GMS Event Tracker
 on:
   schedule:
     - cron: "16 0 * * *" # 매일 오전 9시 16분 KST (UTC 00:16)
-    - cron: "16 9 * * *" # 매일 오후 6시 16분 KST (UTC 09:16)
+    - cron: "16 13 * * *" # 매일 오후 10시 16분 KST (UTC 13:16)
   workflow_dispatch: # 수동 실행 버튼
 
 jobs:
