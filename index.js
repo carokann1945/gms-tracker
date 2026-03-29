@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { fetchNewsList, fetchEventDetail, sleep, fetchKmsEventList } from './src/fetcher.js';
 import { findKmsUrl } from './src/matcher.js';
-import { getExistingIds, upsertEvents } from './src/db.js';
+import { getExistingIds, upsertEvents, getMaxSourceIndex } from './src/db.js';
 import { extractTextFromImage } from './src/ocr.js';
 import { extractBodyImageUrls, extractBodyText, buildGmsUrl } from './src/parser.js';
 import { extractEventPeriodWithAI } from './src/ai.js';
@@ -28,6 +28,13 @@ async function main() {
   }
 
   console.log(`[main] ${newItems.length} new item(s) to process`);
+
+  // 전역 단조 증가 source_index: 신규 항목에 DB 현재 최댓값 이후 번호 부여
+  // newItems[0](최신) → currentMax + length (최고값), newItems[last] → currentMax + 1
+  const currentMax = await getMaxSourceIndex();
+  const sourceIndexMap = new Map(
+    newItems.map((item, i) => [String(item.id), currentMax + newItems.length - i])
+  );
 
   // ★ KMS 이벤트 목록을 루프 전 1회 로드
   const kmsList = await fetchKmsEventList();
@@ -80,6 +87,7 @@ async function main() {
       event_period,
       gms_url: buildGmsUrl(id, eventName),
       kms_url,
+      source_index: sourceIndexMap.get(id) ?? null,
     });
   }
 

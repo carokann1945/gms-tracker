@@ -45,8 +45,28 @@ export async function getExistingIds(ids) {
 }
 
 /**
+ * 현재 DB의 source_index 최댓값을 반환한다. 데이터 없으면 0 반환.
+ * @returns {Promise<number>}
+ */
+export async function getMaxSourceIndex() {
+  try {
+    const client = getClient();
+    const { data, error } = await client
+      .from(TABLE)
+      .select('source_index')
+      .order('source_index', { ascending: false })
+      .limit(1);
+    if (error) throw error;
+    return data?.[0]?.source_index ?? 0;
+  } catch (err) {
+    console.error('[db] getMaxSourceIndex error:', err.message);
+    throw err;
+  }
+}
+
+/**
  * 이벤트 행 배열을 Supabase에 upsert한다. PK(id) 기준 중복 방지.
- * @param {Array<{id: string, name: string, image_url?: string, event_period?: string|null}>} rows
+ * @param {Array<{id: string, name: string, image_url?: string, event_period?: string|null, source_index?: number|null}>} rows
  * @returns {Promise<void>}
  */
 export async function upsertEvents(rows) {
