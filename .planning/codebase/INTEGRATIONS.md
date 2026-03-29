@@ -1,122 +1,268 @@
 # External Integrations
 
-## Summary
+_Last updated: 2026-03-30_
 
-Three external services are used: Nexon's static CMS API (unauthenticated, read-only), Google Cloud Vision API (service account auth, OCR), and Supabase (service role key auth, read/write). No webhooks or outgoing callbacks exist.
+## APIs & External Services
 
-## Details
+### 1. Nexon MapleStory GMS CMS API
 
-### 1. Nexon MapleStory CMS API
+**Purpose:** Primary event data source — provides the news list and per-event HTML detail.
 
-**Purpose:** Source of event data — provides the news list and per-event detail.
+**Authentication:** None — unauthenticated public HTTP GET via Node.js native `fetch`.
 
-**Authentication:** None. Unauthenticated public HTTP GET requests via Node.js built-in `fetch`.
+**File:** `src/fetcher.js`
 
 **Endpoints:**
 
-| Endpoint | Method | Used in | Purpose |
-|----------|--------|---------|---------|
-| `https://g.nexonstatic.com/maplestory/cms/v1/news` | GET | `src/fetcher.js:fetchNewsList()` | Fetch full news list |
-| `https://g.nexonstatic.com/maplestory/cms/v1/news/{id}` | GET | `src/fetcher.js:fetchEventDetail()` | Fetch single event detail |
+| Endpoint | Method | Function | Purpose |
+|---|---|---|---|
+| `https://g.nexonstatic.com/maplestory/cms/v1/news` | GET | `fetchNewsList()` | Fetch full news list; filter to `category === "events"`, take top 10 |
+| `https://g.nexonstatic.com/maplestory/cms/v1/news/{id}` | GET | `fetchEventDetail(id)` | Fetch single event detail with `body` HTML and `imageThumbnail` |
 
-**Data flowing in (from API):**
+**Response shape (news list):**
+```
+Array<item> | { items: Array<item> } | { data: Array<item> }
+```
+Items are filtered by `item.category === 'events'`, capped at 10.
 
-- News list: array or `{ items: [] }` or `{ data: [] }` — contains items with `id`, `category`, and other metadata. Items are filtered to `category === "events"`, top 10 kept.
-- Event detail: object with fields `id`, `name`, `title` (fallback), `imageThumbnail`, `body` (HTML string containing `<img>` tags).
+**Response shape (event detail):**
+```
+{ id, name, title, imageThumbnail, body }
+```
+- `body`: raw HTML string containing event content and `<img>` tags
+- `name ?? title` used as event name fallback
 
-**Data flowing out (to API):** None. Read-only.
+**Throttling:**
+- Detail calls are made **sequentially** in a `for` loop with `await sleep(500)` before each call
+- `THROTTLE_MS = 500` (defined in `index.js`)
+- Purpose: protect Nexon static server from IP banning
 
-**Rate limits / constraints:**
-
-- No official rate limit documented, but the pipeline enforces a **500ms minimum delay** between each detail API call (`THROTTLE_MS = 500` in `index.js`) to avoid triggering IP bans on Nexon's static servers.
-- Detail calls are made **sequentially** (not in parallel) via a `for` loop with `await sleep(THROTTLE_MS)`.
-- Error handling: `fetchNewsList()` rethrows on failure (halts pipeline); `fetchEventDetail()` returns `null` on failure (pipeline continues without that item).
+**Error handling:**
+- `fetchNewsList()` — rethrows on failure (halts pipeline)
+- `fetchEventDetail(id)` — catches and returns `null` (pipeline continues without that item)
 
 ---
 
-### 2. Google Cloud Vision API
+### 2. Nexon MapleStory KMS Website (Web Scraping)
 
-**Purpose:** OCR text extraction from event banner images to find event period dates.
+**Purpose:** Source of KMS (Korean MapleStory) event URLs for GMS-KMS matching.
 
-**Authentication:** Service account key file. The GCP SDK reads the path from `GOOGLE_APPLICATION_CREDENTIALS` environment variable automatically (Application Default Credentials). The key file is `google-credentials.json` at project root (gitignored).
+**Authentication:** None — unauthenticated GET with spoofed `User-Agent` header to bypass Nexon CDN/WAF.
 
-**SDK:** `@google-cloud/vision` v4.3.3 — `ImageAnnotatorClient` instantiated lazily (singleton) in `src/ocr.js`.
+**File:** `src/fetcher.js`
+
+**Endpoints scraped:**
+
+| URL | Parser function | Notes |
+|---|---|---|
+| `https://maplestory.nexon.com/News/Event/Ongoing` | `parseOngoingEvents(html)` | Single page; selects `dt a[href]` matching `/News/Event/{id}` |
+| `https://maplestory.nexon.com/News/Event/Closed?page={n}` | `parseClosedEvents(html)` | Paginated up to 20 pages; selects `dd.data em.event_listMt` + `a[href*="/News/Event/Closed/"]` |
+
+**Request headers:**
+```javascript
+{
+  'User-Agent': 'Mozilla/5.0 (compatible; gms-tracker/1.0)',
+  'Accept': 'text/html,application/xhtml+xml',
+}
+```
+
+**Throttling:**
+- 500ms `sleep` between each Closed-events page request
+- Maximum 20 pages crawled per run (~10 seconds total for closed pages)
+
+**Error handling:**
+- `fetchKmsEventList()` catches errors gracefully — returns events collected up to point of failure (no rethrow)
+
+**Output:** `Array<{ id: string, name: string }>` passed to `src/matcher.js:findKmsUrl()`
+
+---
+
+### 3. OpenAI API (GPT-4o-mini)
+
+**Purpose:** (a) Extract structured event period from text/OCR content. (b) Translate GMS event names to Korean and fuzzy-match against KMS event list.
+
+**Authentication:** `OPENAI_API_KEY` environment variable, passed directly to `new OpenAI({ apiKey: process.env.OPENAI_API_KEY })`.
+
+**SDK:** `openai` `^6.33.0` — `client.chat.completions.create()`
+
+**Files:** `src/ai.js`, `src/matcher.js`
+
+**Call patterns:**
+
+**A. Event period extraction** (`src/ai.js:extractEventPeriodWithAI(text)`):
+```javascript
+client.chat.completions.create({
+  model: 'gpt-4o-mini',
+  messages: [
+    { role: 'system', content: '<Korean prompt requesting YYYY-MM-DD HH:MM (UTC) format>' },
+    { role: 'user', content: text },
+  ],
+  max_tokens: 100,
+  temperature: 0,
+})
+```
+- Returns: parsed date string, or `null` if response is `"not found"`
+- Called up to twice per event (once for body text, once for OCR text if first fails)
+
+**B. KMS name translation** (`src/matcher.js:findKmsUrl()` — Step 1):
+```javascript
+client.chat.completions.create({
+  model: 'gpt-4o-mini',
+  messages: [
+    { role: 'system', content: '<prompt: translate GMS event name to Korean KMS name>' },
+    { role: 'user', content: gmsEventName },
+  ],
+  max_tokens: 100,
+  temperature: 0,
+})
+```
+
+**C. KMS event list matching** (`src/matcher.js:findKmsUrl()` — Step 2):
+```javascript
+client.chat.completions.create({
+  model: 'gpt-4o-mini',
+  messages: [
+    { role: 'system', content: '<prompt: find best-match id from list, return id number or "null">' },
+    { role: 'user', content: `찾는 이름: ${translatedName}\n\n목록:\n${listText}` },
+  ],
+  max_tokens: 20,
+  temperature: 0,
+})
+```
+- Response parsed with `/\d+/` regex to extract numeric ID from potentially verbose GPT output
+
+**Total OpenAI calls per new event item:**
+- Minimum: 3 (period from text + KMS translate + KMS match)
+- Maximum: 4 (period from text fails → period from OCR + KMS translate + KMS match)
+- KMS matching skipped if `gmsEventName` is empty or `kmsList` is empty
+
+**Error handling:**
+- All three functions catch errors and return `null` — OpenAI failure never halts the pipeline
+
+---
+
+### 4. Google Cloud Vision API
+
+**Purpose:** OCR fallback — extract text from event banner images when HTML body text yields no event period.
+
+**Authentication:** Service account key file. Path provided via `GOOGLE_APPLICATION_CREDENTIALS` env var. Consumed automatically by GCP SDK (Application Default Credentials mechanism). Key file: `google-credentials.json` at project root (gitignored).
+
+**SDK:** `@google-cloud/vision` `^4.3.2` — `ImageAnnotatorClient` instantiated lazily (singleton pattern) in `src/ocr.js`.
+
+**File:** `src/ocr.js`
 
 **API call:**
-
 ```javascript
 const [result] = await client.textDetection(imageUrl);
 const annotations = result.textAnnotations ?? [];
 return annotations[0]?.description ?? '';
 ```
+- Called with a **public image URL** directly — no local image download required
+- `annotations[0].description` is the full concatenated OCR text block
 
-`textDetection()` is called with a public image URL directly — no local download required.
+**Cost controls:**
+- Hard limit: `OCR_LIMIT = 2` max Vision API calls per event (defined in `index.js`)
+- Only called when the 1st-layer text extraction returns no period (early-break pattern)
+- Image URLs come from `<img>` tags in event `body` HTML, extracted by `src/parser.js:extractBodyImageUrls()`
 
-**Data flowing in (from API):** `textAnnotations` array; `annotations[0].description` is the full concatenated OCR text of the image.
-
-**Data flowing out (to API):** The public image URL string from Nexon's static CDN.
-
-**Rate limits / constraints:**
-
-- Hard limit of **max 2 Vision API calls per event post** (`OCR_LIMIT = 2` in `index.js`). Images beyond the first 2 in a post's `body` HTML are skipped entirely.
-- **Early exit:** If a valid event period is parsed from the first image, the second image is skipped — Vision API is never called for it.
-- Error handling: `extractTextFromImage()` catches all errors and returns `''` (empty string), so a Vision API failure does not halt the pipeline. The event is saved with `event_period: null`.
-
-**Cost implications:** Maximum 2 API calls per new event item, only for items not already in the DB.
+**Error handling:**
+- `extractTextFromImage()` catches all errors, returns `''` (empty string)
+- A Vision API failure results in `event_period: null` for that event — pipeline continues
 
 ---
 
-### 3. Supabase
+## Data Storage
 
-**Purpose:** Persistent storage for processed event data. Also used for idempotency checks before API calls.
+### Supabase (PostgreSQL)
 
-**Authentication:** Service role key (`SUPABASE_SERVICE_ROLE_KEY`) — bypasses Row Level Security. Configured via `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` environment variables. Client created with `createClient(url, key)` from `@supabase/supabase-js`.
+**Purpose:** Persistent event store — deduplication source and final write target.
 
-**SDK:** `@supabase/supabase-js` v2.100.0 — `SupabaseClient` instantiated lazily (singleton) in `src/db.js`.
+**Authentication:** `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` environment variables. Service role key bypasses Row Level Security (intentional for server-side pipeline). Client validated at first use — throws immediately if either var is missing.
+
+**SDK:** `@supabase/supabase-js` `^2.49.4` (resolved `2.100.0`) — lazy singleton in `src/db.js`.
+
+**File:** `src/db.js`
 
 **Table:** `events`
 
 **Operations:**
 
-| Operation | Function | Query |
-|-----------|----------|-------|
-| Read existing IDs | `getExistingIds(ids)` in `src/db.js` | `.from('events').select('id').in('id', ids)` |
-| Write new/updated events | `upsertEvents(rows)` in `src/db.js` | `.from('events').upsert(rows, { onConflict: 'id' })` |
+| Function | Query | Purpose |
+|---|---|---|
+| `getExistingIds(ids)` | `.from('events').select('id').in('id', ids)` | Returns `Set<string>` of already-stored IDs for deduplication |
+| `getMaxSourceIndex()` | `.from('events').select('source_index').order('source_index', { ascending: false }).limit(1)` | Gets current max ordering index for assigning monotonic order to new items |
+| `upsertEvents(rows)` | `.from('events').upsert(rows, { onConflict: 'id' })` | Inserts or updates event rows; PK conflict on `id` |
 
-**Schema (inferred from upsert payload):**
+**Schema (inferred from upsert payload in `index.js`):**
 
 | Column | Type | Source |
-|--------|------|--------|
-| `id` | string (PK) | Nexon event `id` (cast to string) |
+|---|---|---|
+| `id` | string (PK) | Nexon event ID (cast to string) |
 | `name` | string | `detail.name ?? detail.title ?? ''` |
 | `image_url` | string or null | `detail.imageThumbnail ?? null` |
-| `event_period` | string or null | Parsed from OCR text, or `null` if not found |
+| `event_period` | string or null | AI-parsed date string or `null` |
+| `gms_url` | string | Built by `src/parser.js:buildGmsUrl(id, name)` → `https://www.nexon.com/maplestory/news/events/{id}/{slug}` |
+| `kms_url` | string or null | `https://maplestory.nexon.com/News/Event/{matchedId}` or `null` |
+| `source_index` | number or null | Monotonically increasing integer; newest item gets highest value |
 
-**Data flowing in (from Supabase):** Set of existing `id` strings for deduplication.
-
-**Data flowing out (to Supabase):** Array of event row objects with `id`, `name`, `image_url`, `event_period`.
-
-**Error handling:** Both `getExistingIds()` and `upsertEvents()` rethrow on Supabase errors — these halt the pipeline, since they are critical operations.
-
----
-
-### Image URLs (Nexon CDN — indirect integration)
-
-The `body` HTML from Nexon event detail responses contains `<img src="...">` tags. `src/parser.js:extractBodyImageUrls()` extracts these URLs. They may be:
-
-- Absolute URLs (passed through as-is)
-- Relative paths (prefixed with `https://g.nexonstatic.com`)
-
-These image URLs are passed directly to Google Vision API's `textDetection()`. No local download or caching occurs.
-
-## Notes
-
-- The Nexon API base URL (`https://g.nexonstatic.com/maplestory/cms/v1/news`) is defined twice identically in `src/fetcher.js` as `NEWS_LIST_URL` and `NEWS_DETAIL_URL` — these could be consolidated to a single constant.
-- `SUPABASE_SERVICE_ROLE_KEY` grants full database access bypassing RLS. This is intentional for a server-side pipeline but means the key must be protected carefully.
-- There is no retry logic on any external call. A transient network failure on Nexon detail fetch returns `null` and silently skips that event. A failure on Supabase or the initial Nexon list fetch halts the entire run.
-- No monitoring, alerting, or structured logging integration exists. All observability is via `console.log` / `console.error`.
-- `.env` is gitignored; `google-credentials.json` is also gitignored. Both must be provisioned manually on any new environment.
+**Error handling:**
+- `getExistingIds()` and `upsertEvents()` both rethrow on Supabase errors — these halt the pipeline (critical path)
+- `getMaxSourceIndex()` rethrows on error
 
 ---
 
-*Integration audit: 2026-03-26*
+## File Storage
+
+Local filesystem only. No cloud file storage (S3, GCS buckets, etc.).
+- `.gitignore` lists `temp/`, `downloads/`, `uploads/` — these directories are not created by current code but are pre-emptively excluded
+
+---
+
+## Authentication & Identity
+
+No user authentication. This is a server-side automation pipeline with no HTTP interface. All auth is service-to-service via environment-injected keys.
+
+---
+
+## Monitoring & Observability
+
+**Error tracking:** None — no Sentry, Datadog, or equivalent.
+
+**Logging:** `console.log` / `console.error` only — structured with `[module]` prefixes (e.g. `[main]`, `[fetcher]`, `[db]`, `[ocr]`, `[ai]`, `[matcher]`).
+
+---
+
+## CI/CD & Deployment
+
+**Containerisation:** `Dockerfile` present — `node:24-slim` base, `pnpm` via corepack, production deps only.
+
+**CI pipeline:** GitHub Actions workflows were deleted (per commit `e38377d`). No active CI/CD pipeline.
+
+**Scheduling:** Not defined within the codebase — intended to be triggered by an external scheduler (cron job, cloud scheduler, etc.).
+
+---
+
+## Webhooks & Callbacks
+
+**Incoming:** None — no HTTP server, no webhook endpoints.
+
+**Outgoing:** None — no callbacks or event emissions to external systems.
+
+---
+
+## Environment Configuration Summary
+
+Required env vars (all must be present in `.env` at project root):
+
+| Variable | Service | Notes |
+|---|---|---|
+| `SUPABASE_URL` | Supabase | Project URL, e.g. `https://xxxx.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase | Full DB access key — keep secret |
+| `OPENAI_API_KEY` | OpenAI | API key for GPT-4o-mini calls |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Google Cloud Vision | Absolute path to `google-credentials.json` |
+
+Secrets location: `.env` file (gitignored) + `google-credentials.json` (gitignored, present at project root).
+
+---
+
+_Integration audit: 2026-03-30_

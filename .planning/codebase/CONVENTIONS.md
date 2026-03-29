@@ -1,74 +1,108 @@
 # Coding Conventions
 
-## Summary
+_Last updated: 2026-03-30_
 
-This is a single-pipeline Node.js script using ES Modules throughout. Code is organized into focused single-responsibility modules with consistent `async/await` patterns and per-boundary `try-catch` error handling.
+## Module System
 
-## Details
+**Type:** ES Modules (ESM), enforced by `"type": "module"` in `package.json`.
 
-### Module System
+All `.js` files use `import`/`export` syntax throughout. Named exports only — no default exports from `src/` modules.
 
-**ES Modules (ESM)** — enforced by `"type": "module"` in `package.json`.
+**Import style:**
+```js
+import 'dotenv/config';                             // side-effect import for env loading
+import { load } from 'cheerio';                     // named import from package
+import { createClient } from '@supabase/supabase-js';
+import vision from '@google-cloud/vision';          // default import (third-party SDK)
+```
 
-All files use `import`/`export` syntax:
-- Named exports only — no default exports used for functions
-- Side-effect imports for env loading: `import 'dotenv/config'` in `index.js`
-- File extensions are required on all local imports (e.g., `'./src/fetcher.js'`)
+**Export style** (`src/fetcher.js`, `src/db.js`, `src/parser.js`, `src/ai.js`, `src/ocr.js`, `src/matcher.js`):
+```js
+export async function fetchNewsList() { ... }
+export async function getExistingIds(ids) { ... }
+export function sleep(ms) { ... }
+```
 
-### Async Patterns
+All local imports include explicit `.js` extensions, required by Node.js ESM:
+```js
+import { fetchNewsList, fetchEventDetail, sleep, fetchKmsEventList } from './src/fetcher.js';
+```
 
-**`async/await` exclusively.** No raw `.then()/.catch()` chaining anywhere in the codebase.
+No path aliases. All imports are bare package names or relative paths.
 
-Sequential async loops are used deliberately over `Promise.all` to respect external API rate limits:
+## Async Patterns
+
+All async operations use `async/await`. No raw `.then()/.catch()` chaining anywhere.
+
+`Promise.all` is deliberately avoided to respect external API rate limits. Sequential loops with explicit `sleep()` throttle are used instead:
 
 ```js
-// src/fetcher.js — sequential throttled calls
+// index.js — sequential throttled fetch loop
 for (const item of newItems) {
   await sleep(THROTTLE_MS);
-  const detail = await fetchEventDetail(item.id);
+  try {
+    const detail = await fetchEventDetail(item.id);
+    if (detail) newDetails.push(detail);
+  } catch (err) {
+    console.error(`[main] Failed to fetch detail for id=${item.id}:`, err.message);
+  }
 }
 ```
 
-The `sleep` utility is a plain Promise wrapper in `src/fetcher.js`:
-
+**`sleep` utility** (`src/fetcher.js`):
 ```js
 export function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 ```
 
-### Error Handling
-
-Each network boundary has its own independent `try-catch`. Errors are logged and either re-thrown (fatal path) or swallowed with a safe fallback (non-fatal path):
-
-**Re-throw pattern** — used when failure should halt the pipeline (e.g., DB unavailable):
+**Early-exit pattern** — when Layer 1 text extraction succeeds, the OCR branch is skipped entirely:
 ```js
-// src/db.js
+event_period = await extractEventPeriodWithAI(bodyText);
+if (!event_period) {
+  // only then enter OCR fallback branch
+}
+```
+
+## Error Handling
+
+Each network boundary has an independent `try/catch`. Errors are logged with a `[module]` prefix and the function either rethrows (fatal path) or returns a safe fallback (non-fatal path).
+
+**Rethrow pattern** — used in `src/db.js` where DB failure should halt the pipeline:
+```js
 } catch (err) {
   console.error('[db] getExistingIds error:', err.message);
   throw err;
 }
 ```
 
-**Null-return pattern** — used when a single item failing should not stop the pipeline:
+**Null-return pattern** — used in `src/ai.js` and `src/matcher.js` where per-item failure must not stop the run:
 ```js
-// src/fetcher.js
+// src/ai.js
 } catch (err) {
-  console.error(`[fetcher] fetchEventDetail error (id=${id}):`, err.message);
+  console.error('[ai] GPT call failed:', err.message);
   return null;
 }
 ```
 
-**Empty-string pattern** — used in OCR so a bad image URL doesn't break the loop:
+**Empty-string pattern** — used in `src/ocr.js` so a bad image URL does not break the loop:
 ```js
-// src/ocr.js
 } catch (err) {
   console.error(`[ocr] extractTextFromImage error (url=${imageUrl}):`, err.message);
   return '';
 }
 ```
 
-Fatal top-level errors are caught in `index.js`:
+**Graceful degradation** — `src/fetcher.js`'s `fetchKmsEventList` returns however many events it collected before an error, rather than throwing:
+```js
+} catch (err) {
+  console.error('[fetcher] fetchKmsEventList error:', err.message);
+  // 에러 이전까지 수집된 이벤트 반환 (graceful degradation)
+}
+return events;
+```
+
+**Fatal top-level catch** in `index.js`:
 ```js
 main().catch((err) => {
   console.error('[main] Fatal error:', err);
@@ -76,25 +110,25 @@ main().catch((err) => {
 });
 ```
 
-### Naming Conventions
+**Guard clauses** at function entry prevent deep nesting:
+```js
+if (!ids.length) return new Set();
+if (!rows.length) { console.log('[db] No rows to upsert'); return; }
+if (!bodyHtml) return [];
+if (!text) return null;
+```
 
-**Files:** `camelCase.js` for all source modules (`fetcher.js`, `parser.js`, `ocr.js`, `db.js`)
+## Naming Conventions
 
-**Functions:** `camelCase` verbs — `fetchNewsList`, `fetchEventDetail`, `extractTextFromImage`, `extractBodyImageUrls`, `parseEventPeriod`, `getExistingIds`, `upsertEvents`
+**Files:** `camelCase.js` for all modules in `src/` (`ai.js`, `db.js`, `fetcher.js`, `matcher.js`, `ocr.js`, `parser.js`).
 
-**Constants:** `UPPER_SNAKE_CASE` — `THROTTLE_MS`, `OCR_LIMIT`, `TABLE`, `NEWS_LIST_URL`, `NEWS_DETAIL_URL`, `NEXON_BASE`
+**Functions:** `camelCase` verbs — `fetchNewsList`, `fetchEventDetail`, `fetchKmsEventList`, `extractTextFromImage`, `extractBodyText`, `extractBodyImageUrls`, `extractEventPeriodWithAI`, `buildGmsUrl`, `findKmsUrl`, `getExistingIds`, `getMaxSourceIndex`, `upsertEvents`, `parseOngoingEvents`, `parseClosedEvents`.
 
-**Private/module-level singletons:** prefixed with underscore — `_client` (used in both `src/db.js` and `src/ocr.js`)
+**Constants:** `UPPER_SNAKE_CASE` at module scope — `THROTTLE_MS`, `OCR_LIMIT`, `NEWS_LIST_URL`, `NEWS_DETAIL_URL`, `NEXON_BASE`, `TABLE`, `PROMPT`.
 
-**Variables:** `camelCase` — `newItems`, `existingIds`, `bodyUrls`, `event_period` (exception: DB row fields use `snake_case` to match Supabase column names)
+**Variables:** `camelCase` — `newItems`, `existingIds`, `bodyHtml`, `event_period` (exception: DB row field names use `snake_case` to match Supabase column names: `event_period`, `image_url`, `gms_url`, `kms_url`, `source_index`).
 
-### Code Style Observations
-
-**JSDoc comments on every exported function.** All public functions in `src/` have `@param` and `@returns` annotations.
-
-**Inline comments** are used for non-obvious logic (e.g., explaining API response shape normalization, regex pattern intent, relative URL handling).
-
-**Lazy singleton pattern** for expensive clients (Supabase, Google Vision):
+**Private module-level singletons:** prefixed with underscore — `_client` in both `src/db.js` and `src/ocr.js`.
 ```js
 let _client = null;
 function getClient() {
@@ -104,25 +138,79 @@ function getClient() {
 }
 ```
 
-**Guard clauses** at function entry to avoid deep nesting:
+## Console Logging
+
+All log calls include a bracketed module prefix as the first token. No third-party logging library is used.
+
+| Module | Prefix |
+|---|---|
+| `index.js` | `[main]` |
+| `src/ai.js` | `[ai]` |
+| `src/db.js` | `[db]` |
+| `src/fetcher.js` | `[fetcher]` |
+| `src/matcher.js` | `[matcher]` |
+| `src/ocr.js` | `[ocr]` |
+
+`console.log` for progress, `console.error` for errors. Only `err.message` is logged, never the full error object with stack in normal flow.
+
+## JSDoc Comments
+
+All exported functions have JSDoc blocks with `@param` and `@returns`. Internal helpers (`parseOngoingEvents`, `parseClosedEvents`, `getClient`) also carry JSDoc.
+
 ```js
-if (!ids.length) return new Set();
-if (!rows.length) { console.log(...); return; }
-if (!bodyHtml) return [];
-if (!text) return null;
+/**
+ * Brief description.
+ * @param {string} text
+ * @returns {Promise<string | null>} 찾으면 정제된 날짜 문자열, 못 찾으면 null
+ */
+export async function extractEventPeriodWithAI(text) { ... }
 ```
 
-**Nullish coalescing** used throughout for safe defaults: `data.items ?? data.data ?? []`, `detail.name ?? detail.title ?? ''`, `annotations[0]?.description ?? ''`
+Inline comments explain non-obvious decisions, pitfalls, and API quirks (e.g., `// Pitfall 3 방지:`, `// User-Agent 헤더 없으면 Nexon CDN/WAF가 빈 HTML을 반환할 수 있으므로 반드시 포함.`).
 
-**Log prefix pattern:** every `console.log` and `console.error` call is prefixed with the module name in brackets: `[main]`, `[fetcher]`, `[db]`, `[ocr]`.
+## Code Style
 
-### Constants Placement
+No linter or formatter config files are present (no `.eslintrc`, `biome.json`, `.prettierrc`). Style is consistent by convention:
 
-Module-level constants are declared at the top of each file. Pipeline-wide constants (`THROTTLE_MS`, `OCR_LIMIT`) are declared at the top of `index.js` and are not exported — they are not shared across modules.
+- 2-space indentation
+- Single quotes for strings
+- Trailing commas in multiline arrays/objects
+- Nullish coalescing for safe defaults: `data.items ?? data.data ?? []`, `detail.name ?? detail.title ?? ''`, `annotations[0]?.description ?? ''`
+- Optional chaining for nested property access: `response.choices[0]?.message?.content?.trim()`
+- Blank lines between logical sections within functions
 
-## Notes
+## Environment Variable Usage
 
-- No linter config (`.eslintrc`, `biome.json`, etc.) is present. Code style is consistent but unenforced by tooling.
-- No formatter config (`.prettierrc`, etc.) is present.
-- `snake_case` is used for DB row field names (`event_period`, `image_url`) to match Supabase column conventions, which is an intentional exception to the otherwise camelCase variable naming.
-- The `.npmrc` file exists but its contents should not be read (may contain auth tokens).
+All secrets and configuration are injected via `process.env`. No hardcoded values.
+
+**Required env vars:**
+
+| Variable | Used in | Purpose |
+|---|---|---|
+| `OPENAI_API_KEY` | `src/ai.js`, `src/matcher.js` | OpenAI client init |
+| `SUPABASE_URL` | `src/db.js` | Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | `src/db.js` | Supabase auth key |
+| `GOOGLE_APPLICATION_CREDENTIALS` | `src/ocr.js` (implicit, read by GCP SDK) | Absolute path to GCP service account JSON |
+
+`dotenv/config` is loaded as a side-effect import at the top of `index.js`:
+```js
+import 'dotenv/config';
+```
+
+Missing required vars throw explicitly at client construction time, not silently at first use:
+```js
+if (!url || !key) {
+  throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in .env');
+}
+```
+
+## Security Patterns
+
+- `.env`, `google-credentials.json`, and `*.pem` are listed in `.gitignore`
+- GCP credentials are read by the SDK via `GOOGLE_APPLICATION_CREDENTIALS` env var; application code never reads the JSON file directly
+- Error logs emit only `err.message`, never full objects that might contain tokens or request bodies
+- `google-credentials.json` exists at the project root but is gitignored
+
+---
+
+_Convention analysis: 2026-03-30_

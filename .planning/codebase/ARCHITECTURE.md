@@ -1,150 +1,194 @@
 # Architecture
 
-**Analysis Date:** 2026-03-26
+_Last updated: 2026-03-30_
 
-## Summary
+## Pattern Overview
 
-A single-process Node.js pipeline that fetches MapleStory GMS event listings from the Nexon CMS API, deduplicates against Supabase, OCR-scans event images via Google Cloud Vision to extract event periods, and upserts structured rows back to Supabase.
-
-## Details
-
-### Pattern Overview
-
-**Overall:** Linear ETL pipeline — Extract → Transform → Load, orchestrated imperatively in a single `main()` function.
+**Overall:** Linear ETL pipeline — a single-shot script that runs to completion and exits. There is no server, no daemon, and no event loop; execution is triggered externally (cron / Docker run).
 
 **Key Characteristics:**
-- No scheduling built-in; designed to be triggered externally (cron, manual run)
-- Strictly sequential per-item processing (no parallelism) to respect Nexon rate limits
-- Early-exit optimizations at multiple stages (no new items → exit; date found → skip remaining images)
-- Lazy singleton pattern for external service clients (`_client` variable in `db.js` and `ocr.js`)
+- Sequential, top-to-bottom `async/await` flow inside a single `main()` function in `index.js`
+- Stateless between runs — all persistence is in Supabase; idempotency is enforced via PK upsert
+- Each module is a focused utility layer; `index.js` is the only orchestrator
+- External API calls (Nexon GMS, Nexon KMS, OpenAI, Google Vision, Supabase) are isolated behind module boundaries with independent `try-catch` blocks so one failure does not abort the whole pipeline
+- Cost control is built into the design: OCR is only invoked when text extraction fails (early-break), and at most 2 images are processed per event
 
 ---
 
-### High-Level Data Flow
+## Pipeline Stages
 
-```
-Nexon CMS API (news list)
-        │
-        ▼
-  fetchNewsList()         → filters category="events", keeps top 10
-        │
-        ▼
-  getExistingIds()        → queries Supabase for already-stored ids
-        │
-        ▼
-  [filter: new ids only]
-        │
-        ▼
-  fetchEventDetail(id)    → one API call per new item, 500ms throttle between calls
-        │
-        ▼
-  extractBodyImageUrls()  → regex parse of HTML body to get <img src> URLs
-        │
-        ▼
-  extractTextFromImage()  → Google Cloud Vision OCR, max 2 images per event
-        │
-        ▼
-  parseEventPeriod()      → regex match for date range string from OCR text
-        │
-        ▼
-  upsertEvents()          → Supabase upsert on conflict by id
-```
-
----
-
-### Pipeline Steps (in `index.js`)
-
-**Step 1 — Fetch event list:**
-- Calls `fetchNewsList()` from `src/fetcher.js`
-- Returns top 10 events with `category === 'events'`
-- Exits early if result is empty
-
-**Step 2 — Deduplicate:**
-- Extracts `id` strings from the list
-- Calls `getExistingIds(ids)` from `src/db.js` which does a `.select('id').in('id', ids)` query
-- Filters list to only items not already in DB
-- Exits early if nothing new
-
-**Step 3 — Fetch details with throttle:**
-- Iterates `newItems` sequentially with `await sleep(500)` before each call
-- Calls `fetchEventDetail(id)` from `src/fetcher.js` per item
-- Null results (failed fetches) are silently dropped
-
-**Step 4 — OCR and parse:**
-- For each detail, calls `extractBodyImageUrls(detail.body)` from `src/parser.js` to get image URLs from HTML
-- Takes at most the first 2 URLs (`OCR_LIMIT = 2`)
-- For each candidate image URL, calls `extractTextFromImage(url)` from `src/ocr.js`
-- Calls `parseEventPeriod(text)` from `src/parser.js` on the returned text
-- Breaks out of the image loop as soon as a match is found (early return)
-- If neither image yields a date, `event_period` is `null`
-
-**Step 5 — Persist:**
-- Collects rows of shape `{ id, name, image_url, event_period }`
-- Calls `upsertEvents(rows)` from `src/db.js`
-- Uses Supabase `.upsert(..., { onConflict: 'id' })`
-
----
-
-### Module Responsibilities
-
-**`index.js` — Orchestrator:**
-- Owns the full pipeline sequence
-- Defines constants `THROTTLE_MS = 500` and `OCR_LIMIT = 2`
-- All cross-module coordination happens here
-- Top-level error boundary via `.catch()` with `process.exit(1)`
-
-**`src/fetcher.js` — Nexon API client:**
-- Exports: `fetchNewsList()`, `fetchEventDetail(id)`, `sleep(ms)`
-- Uses Node.js built-in `fetch` (no HTTP library)
+### Stage 1 — Fetch GMS event list
+- **Module:** `src/fetcher.js` → `fetchNewsList()`
+- **Source:** `https://g.nexonstatic.com/maplestory/cms/v1/news`
+- Filters for `category === "events"`, slices top 10
 - Handles flexible API response shapes: bare array, `{ items: [] }`, or `{ data: [] }`
-- `fetchEventDetail` returns `null` on error (non-fatal); `fetchNewsList` re-throws (fatal)
+- Returns `Array<{id, ...rawFields}>`; re-throws on error (fatal)
 
-**`src/db.js` — Supabase client:**
-- Exports: `getExistingIds(ids)`, `upsertEvents(rows)`
-- Lazy singleton `getClient()` reads `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from env
-- `getExistingIds` throws on error (fatal — pipeline cannot proceed without dedup)
-- `upsertEvents` throws on error (fatal — data must not be silently lost)
-- Target table: `events`
+### Stage 2 — Deduplication check
+- **Module:** `src/db.js` → `getExistingIds(ids)`
+- Queries the Supabase `events` table for which of the 10 IDs already exist
+- Only items absent from DB continue through the pipeline (idempotency guarantee)
+- **Module:** `src/db.js` → `getMaxSourceIndex()`
+- Queries current max `source_index` value once; used to assign monotonically increasing indices to new rows
+- `newItems[0]` (most recent in API order) receives `currentMax + length` (highest), so ordering by `source_index DESC` reflects recency
 
-**`src/ocr.js` — Google Cloud Vision client:**
-- Exports: `extractTextFromImage(imageUrl)`
-- Lazy singleton `getClient()` uses `GOOGLE_APPLICATION_CREDENTIALS` env var automatically
-- Returns `''` (empty string) on failure — non-fatal, OCR errors do not stop the pipeline
-- Extracts `textAnnotations[0].description` which contains the full detected text block
+### Stage 3 — Fetch KMS event list (pre-loop, single load)
+- **Module:** `src/fetcher.js` → `fetchKmsEventList()`
+- Scrapes `https://maplestory.nexon.com/News/Event/Ongoing` (single page, `dt a[href]` selector)
+- Scrapes `/Closed?page=N` (up to 20 pages, `dd.data em.event_listMt` selector, 500 ms throttle per page)
+- HTML parsing via `cheerio`; loaded once before the per-event loop to avoid N redundant scraping runs
+- Returns `Array<{id, name}>`; on error returns whatever was collected so far (graceful degradation)
 
-**`src/parser.js` — Text/HTML parsing utilities:**
-- Exports: `extractBodyImageUrls(bodyHtml)`, `parseEventPeriod(text)`
-- `extractBodyImageUrls`: regex-based HTML `<img src>` extractor; resolves relative URLs against `https://g.nexonstatic.com`
-- `parseEventPeriod`: matches pattern `M/D/YYYY (Day) ... - M/D/YYYY (Day) ...`; normalizes whitespace/newlines from OCR; returns `null` if no match
+### Stage 4 — Fetch GMS event detail (throttled)
+- **Module:** `src/fetcher.js` → `fetchEventDetail(id)`
+- Sequential loop with `sleep(500)` between calls to avoid Nexon CDN rate-limits
+- **Source:** `https://g.nexonstatic.com/maplestory/cms/v1/news/{id}`
+- Returns full event object including `body` (raw HTML), `name`/`title`, `imageThumbnail`; returns `null` on error (non-fatal, item skipped)
+
+### Stage 5 — Multi-layer date extraction
+
+#### Layer 1 — Text-based extraction (primary, cheaper path)
+- **Module:** `src/parser.js` → `extractBodyText(bodyHtml)`
+  - Loads HTML with `cheerio`, returns `$('body').text()` collapsed to single spaces
+- **Module:** `src/ai.js` → `extractEventPeriodWithAI(text)`
+  - Sends text to `gpt-4o-mini` with a fixed system prompt requesting `YYYY-MM-DD HH:MM (UTC) - YYYY-MM-DD HH:MM (UTC)` format
+  - `temperature: 0`, `max_tokens: 100` — deterministic, minimal token spend
+  - Returns `null` if response is `"not found"` or an error occurs
+  - **Early break:** if a non-null period is returned here, OCR (Layer 2) is skipped entirely
+
+#### Layer 2 — OCR fallback (only when Layer 1 returns null)
+- **Module:** `src/parser.js` → `extractBodyImageUrls(bodyHtml)`
+  - Regex-extracts `<img src="...">` values, resolves relative paths against `https://g.nexonstatic.com`
+  - Only the first `OCR_LIMIT = 2` images are used (constant defined in `index.js`)
+- **Module:** `src/ocr.js` → `extractTextFromImage(imageUrl)`
+  - Calls `@google-cloud/vision` `ImageAnnotatorClient.textDetection()` per image URL
+  - Returns `annotations[0].description` (full detected text block) or `''` on error (non-fatal)
+- **Module:** `src/ai.js` → `extractEventPeriodWithAI(combinedOcrText)`
+  - All OCR texts are joined with `\n\n` and sent in a single AI call (not one call per image)
+
+### Stage 6 — KMS URL matching (per event)
+- **Module:** `src/matcher.js` → `findKmsUrl(gmsEventName, kmsList)`
+- Two sequential `gpt-4o-mini` calls per event:
+  1. Translate GMS English event name to Korean
+  2. Match the Korean name against the pre-loaded `kmsList` to find the best-fit KMS event ID
+- Returns `https://maplestory.nexon.com/News/Event/{matchedId}` or `null`
+- Guards against GPT returning `"id=1301"` or prose — a `/\d+/` regex extracts the bare numeric ID
+- Always returns `https://maplestory.nexon.com/News/Event/{id}` form (not `/Closed/` path)
+
+### Stage 7 — GMS URL construction
+- **Module:** `src/parser.js` → `buildGmsUrl(id, name)`
+- Strips non-alphanumeric characters from `name`, lowercases, hyphenates to form a URL slug
+- Constructs `https://www.nexon.com/maplestory/news/events/{id}/{slug}`
+
+### Stage 8 — Upsert to Supabase
+- **Module:** `src/db.js` → `upsertEvents(rows)`
+- Batch upserts all processed rows to the `events` table with `onConflict: 'id'`
+- Row shape: `{ id, name, image_url, event_period, gms_url, kms_url, source_index }`
 
 ---
 
-### Error Handling Strategy
+## Data Flow
 
-Each module uses independent `try-catch` blocks. Fatality is determined by whether the error blocks deduplication or data persistence:
+```
+Nexon GMS News API
+       │
+       ▼
+fetchNewsList()            ← top 10 events, category=events
+       │
+       ▼
+getExistingIds()           ← filter to new IDs only (Supabase read)
+getMaxSourceIndex()        ← compute source_index base (Supabase read)
+       │
+       ▼
+fetchKmsEventList()        ← load KMS events once (ongoing + ≤20 closed pages)
+       │
+       ▼
+[for each new item, sequential with 500ms throttle]
+  fetchEventDetail(id)     ← Nexon GMS detail API
+       │
+       ├── extractBodyText(html)
+       │   extractEventPeriodWithAI(text)      ← gpt-4o-mini
+       │        │
+       │        ├── [found] ─────────────────────────────────┐
+       │        │                                            │
+       │        └── [null] → extractBodyImageUrls(html)      │
+       │                     extractTextFromImage(url) × ≤2  │
+       │                     ← Google Cloud Vision OCR       │
+       │                     extractEventPeriodWithAI(ocr)   │
+       │                     ← gpt-4o-mini                   │
+       │                                                     │
+       │   ◄────────────────────────────────────────────────┘
+       │
+       ├── findKmsUrl(name, kmsList)           ← gpt-4o-mini × 2 calls
+       │   (translate GMS name → match KMS list)
+       │
+       └── buildGmsUrl(id, name)              ← pure, no I/O
+              │
+              ▼
+         row assembled: { id, name, image_url, event_period,
+                          gms_url, kms_url, source_index }
+       │
+       ▼
+upsertEvents(rows)         ← Supabase batch upsert, onConflict='id'
+```
+
+---
+
+## Error Handling Strategy
+
+Each module uses an independent `try-catch` block. Fatality is determined by whether the error blocks deduplication or data persistence:
 
 | Module | On Error | Effect |
 |---|---|---|
-| `fetcher.js` `fetchNewsList` | re-throws | Fatal — main exits |
-| `fetcher.js` `fetchEventDetail` | returns `null` | Non-fatal — item skipped |
-| `db.js` `getExistingIds` | re-throws | Fatal — main exits |
-| `db.js` `upsertEvents` | re-throws | Fatal — main exits |
-| `ocr.js` `extractTextFromImage` | returns `''` | Non-fatal — period stays null |
-| `parser.js` functions | no throws | Pure functions, return null/[] |
+| `src/fetcher.js` `fetchNewsList` | re-throws | Fatal — `main()` exits |
+| `src/fetcher.js` `fetchEventDetail` | returns `null` | Non-fatal — item skipped |
+| `src/fetcher.js` `fetchKmsEventList` | logs, returns partial list | Non-fatal — degraded matching |
+| `src/db.js` `getExistingIds` | re-throws | Fatal — `main()` exits |
+| `src/db.js` `getMaxSourceIndex` | re-throws | Fatal — `main()` exits |
+| `src/db.js` `upsertEvents` | re-throws | Fatal — `main()` exits |
+| `src/ai.js` `extractEventPeriodWithAI` | returns `null` | Non-fatal — period stays null |
+| `src/matcher.js` `findKmsUrl` | returns `null` | Non-fatal — kms_url stays null |
+| `src/ocr.js` `extractTextFromImage` | returns `''` | Non-fatal — image skipped |
+| `src/parser.js` functions | no throws | Pure functions, return null/[] |
 
 ---
 
-### Notable Design Decisions
+## Key Design Decisions
 
-- **No build step:** ES Modules used natively in Node.js (`"type": "module"` in `package.json`). No TypeScript, no bundler.
-- **Lazy singletons:** Both `db.js` and `ocr.js` initialize their SDK clients only on first call, avoiding startup errors when credentials are missing but not yet needed.
-- **Null-safe field access:** `detail.name ?? detail.title ?? ''` and `detail.imageThumbnail ?? null` handle varying API response shapes gracefully.
-- **Idempotent upsert:** Using `onConflict: 'id'` means re-running the pipeline for existing items is safe.
-- **OCR cost control:** Hard-coded `OCR_LIMIT = 2` in `index.js` caps Google Vision API calls per event.
+**Lazy Supabase and Vision client initialization (`getClient()` singleton in `src/db.js` and `src/ocr.js`):**
+The SDK client is created on first call rather than at module load time. This avoids throwing at import if env vars are missing.
 
-## Notes
+**KMS list loaded once, passed as argument to `findKmsUrl`:**
+`fetchKmsEventList()` runs once before the per-event loop and its result is passed as a parameter. This prevents N redundant scraping runs (one per event) and makes `findKmsUrl` a pure-input function.
 
-- The `sleep()` utility is exported from `fetcher.js` but is only consumed in `index.js`. It could reasonably live in a `utils.js` module if the project grows.
-- `NEWS_LIST_URL` and `NEWS_DETAIL_URL` in `fetcher.js` are defined as separate constants but currently hold the same base URL string.
-- No retry logic exists on any API call. A transient network failure on `fetchNewsList` or any Supabase call will fail the entire run.
-- There is no scheduling mechanism in the codebase. The pipeline must be invoked externally (e.g., cron job, CI schedule).
+**`source_index` assignment (reverse order):**
+`newItems[0]` is the most-recent event at the top of the GMS API response. It receives `currentMax + length` (highest value), so `ORDER BY source_index DESC` in Supabase reflects chronological recency.
+
+**OCR cost control:**
+`OCR_LIMIT = 2` in `index.js` caps Google Vision API calls per event. Combined with the Layer-1 early break, OCR is only reached for events whose body text contains no parseable dates.
+
+**No build step / transpilation:**
+`"type": "module"` in `package.json` enables native ES Modules. No TypeScript, no Babel, no bundler.
+
+**Docker deployment:**
+`Dockerfile` uses `node:24-slim`, installs only production dependencies via `pnpm install --frozen-lockfile --prod`, and runs `node index.js` as the sole container command. Designed for one-shot execution triggered by an external scheduler.
+
+---
+
+## Module Responsibilities
+
+| Module | Responsibility |
+|---|---|
+| `index.js` | Pipeline orchestration, loop control, row assembly, constants |
+| `src/fetcher.js` | All outbound HTTP to Nexon (GMS REST API + KMS HTML scraping) and `sleep()` utility |
+| `src/parser.js` | Stateless HTML/text parsing: extract body text, extract image URLs, build GMS URL slug |
+| `src/ai.js` | OpenAI client wrapper — single exported function for date period extraction via `gpt-4o-mini` |
+| `src/matcher.js` | OpenAI client wrapper — two-step translate-then-match for KMS URL lookup via `gpt-4o-mini` |
+| `src/ocr.js` | Google Cloud Vision wrapper — OCR text extraction from image URL |
+| `src/db.js` | Supabase wrapper — read existing IDs, read max source_index, batch upsert |
+
+No `src/` module imports from another `src/` module. All cross-module wiring is in `index.js`.
+
+---
+
+*Architecture analysis: 2026-03-30*
