@@ -26,7 +26,7 @@ const TZ_OFFSET_MAP = {
 
 // 캡처 그룹: (monthStr)(dayStr)(yearStr)(tzAbbr)(offsetStr?)(startTimeStr)(endTimeStr?)
 const TIMES_RE =
-  /Times:\s+\w+,\s+(\w+)\s+(\d{1,2}),\s+(\d{4})\s+(\w+)(?:\s*\(UTC\s*([+-]?\d+)\))?:\s+(\d{1,2}:\d{2}\s+[AP]M)(?:\s+-\s+(\d{1,2}:\d{2}\s+[AP]M))?/i;
+  /Times:\s+\w+,\s+(\w+)\s+(\d{1,2}),\s+(\d{4})\s+(\w+)(?:\s*\(UTC\s*([+-]?\d+)\))?:\s+(\d{1,2}:\d{2}\s+[AP]M)(?:\s+-\s+(\d{1,2}:\d{2}\s+[AP]M)(?:\s+(\w+)\s+(\d{1,2}))?)?/i;
 
 /**
  * 저장 대상 여부를 판단한다.
@@ -87,7 +87,7 @@ function parseMaintenanceTimes(bodyText) {
   const m = bodyText.match(TIMES_RE);
   if (!m) return { start_at: null, end_at: null };
 
-  const [, monthStr, dayStr, yearStr, tzAbbr, offsetStr, startTimeStr, endTimeStr] = m;
+  const [, monthStr, dayStr, yearStr, tzAbbr, offsetStr, startTimeStr, endTimeStr, endMonthStr, endDayStr] = m;
 
   const month = MONTHS[monthStr];
   if (month === undefined) return { start_at: null, end_at: null };
@@ -114,7 +114,19 @@ function parseMaintenanceTimes(bodyText) {
   if (endTimeStr) {
     const endTime = parseTime12(endTimeStr.trim());
     if (endTime) {
-      const endMs = baseDayMs + (endTime.hour - offsetHours) * 3_600_000 + endTime.minutes * 60_000;
+      let endBaseDayMs = baseDayMs;
+      if (endMonthStr && endDayStr) {
+        const endMonth = MONTHS[endMonthStr];
+        const endDay = parseInt(endDayStr, 10);
+        if (endMonth !== undefined) {
+          endBaseDayMs = Date.UTC(year, endMonth, endDay);
+          // 연말 롤오버: 12/31 시작 → 1/1 종료 케이스 대응
+          if (endBaseDayMs < baseDayMs) {
+            endBaseDayMs = Date.UTC(year + 1, endMonth, endDay);
+          }
+        }
+      }
+      const endMs = endBaseDayMs + (endTime.hour - offsetHours) * 3_600_000 + endTime.minutes * 60_000;
       end_at = new Date(endMs).toISOString();
     }
   }
