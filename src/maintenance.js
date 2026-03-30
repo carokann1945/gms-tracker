@@ -16,8 +16,17 @@ const MONTHS = {
 
 // extractBodyText()는 whitespace를 모두 space 1개로 collapse하므로
 // "Times: Thursday, March 26, 2026 PDT (UTC -7): 5:00 AM - 11:00 PM" 형태가 됨
+// UTC offset이 명시되지 않은 경우(e.g. "PST: 5:00 AM") TZ_OFFSET_MAP으로 fallback
+const TZ_OFFSET_MAP = {
+  PST: -8, PDT: -7,
+  EST: -5, EDT: -4,
+  MST: -7, MDT: -6,
+  CST: -6, CDT: -5,
+};
+
+// 캡처 그룹: (monthStr)(dayStr)(yearStr)(tzAbbr)(offsetStr?)(startTimeStr)(endTimeStr?)
 const TIMES_RE =
-  /Times:\s+\w+,\s+(\w+)\s+(\d{1,2}),\s+(\d{4})\s+\w+\s+\(UTC\s*([+-]?\d+)\):\s+(\d{1,2}:\d{2}\s+[AP]M)\s+-\s+(\d{1,2}:\d{2}\s+[AP]M)/i;
+  /Times:\s+\w+,\s+(\w+)\s+(\d{1,2}),\s+(\d{4})\s+(\w+)(?:\s*\(UTC\s*([+-]?\d+)\))?:\s+(\d{1,2}:\d{2}\s+[AP]M)(?:\s+-\s+(\d{1,2}:\d{2}\s+[AP]M))?/i;
 
 /**
  * 저장 대상 여부를 판단한다.
@@ -78,26 +87,41 @@ function parseMaintenanceTimes(bodyText) {
   const m = bodyText.match(TIMES_RE);
   if (!m) return { start_at: null, end_at: null };
 
-  const [, monthStr, dayStr, yearStr, offsetStr, startTimeStr, endTimeStr] = m;
+  const [, monthStr, dayStr, yearStr, tzAbbr, offsetStr, startTimeStr, endTimeStr] = m;
 
   const month = MONTHS[monthStr];
   if (month === undefined) return { start_at: null, end_at: null };
 
   const day = parseInt(dayStr, 10);
   const year = parseInt(yearStr, 10);
-  const offsetHours = parseInt(offsetStr, 10); // e.g., -7 (PDT), -8 (PST)
+
+  // UTC offset: 텍스트 명시값 우선, 없으면 timezone 약어로 fallback
+  let offsetHours;
+  if (offsetStr !== undefined) {
+    offsetHours = parseInt(offsetStr, 10);
+  } else {
+    offsetHours = TZ_OFFSET_MAP[tzAbbr?.toUpperCase()];
+    if (offsetHours === undefined) return { start_at: null, end_at: null };
+  }
 
   const startTime = parseTime12(startTimeStr.trim());
-  const endTime = parseTime12(endTimeStr.trim());
-  if (!startTime || !endTime) return { start_at: null, end_at: null };
+  if (!startTime) return { start_at: null, end_at: null };
 
   const baseDayMs = Date.UTC(year, month, day);
   const startMs = baseDayMs + (startTime.hour - offsetHours) * 3_600_000 + startTime.minutes * 60_000;
-  const endMs   = baseDayMs + (endTime.hour   - offsetHours) * 3_600_000 + endTime.minutes * 60_000;
+
+  let end_at = null;
+  if (endTimeStr) {
+    const endTime = parseTime12(endTimeStr.trim());
+    if (endTime) {
+      const endMs = baseDayMs + (endTime.hour - offsetHours) * 3_600_000 + endTime.minutes * 60_000;
+      end_at = new Date(endMs).toISOString();
+    }
+  }
 
   return {
     start_at: new Date(startMs).toISOString(),
-    end_at:   new Date(endMs).toISOString(),
+    end_at,
   };
 }
 
