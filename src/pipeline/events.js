@@ -1,24 +1,17 @@
-import {
-  fetchNewsList,
-  fetchEventDetail,
-  fetchKmsEventList,
-  sleep,
-} from "../fetcher.js";
+import { fetchNewsList, fetchEventDetail, sleep } from "../fetcher.js";
 import { getProcessedIds, upsertEvents, upsertNonEvents } from "../db.js";
 import {
   extractBodyText,
   extractBodyImageUrls,
-  extractFirstH2Text,
   buildGmsUrl,
 } from "../parser.js";
 import { extractTextFromImage } from "../ocr.js";
-import { extractEventPeriodWithAI } from "../ai.js";
+import { extractEventPeriodWithAI, generateEventSummaryWithAI } from "../ai.js";
 import { isHotWeekNotice, parseHotWeekDates } from "../domain/hotWeek.js";
-import { findKmsUrl } from "../matcher.js";
 
 const THROTTLE_MS = 500;
 const OCR_LIMIT = 30;
-const EVENT_LIMIT = 6;
+const EVENT_LIMIT = 10;
 
 function isEligibleEventItem(item) {
   const isEvent = item.category === "events";
@@ -40,7 +33,7 @@ async function extractEventPeriod({ liveDate, name, bodyHtml, bodyText }) {
     const parsed = parseHotWeekDates(name, bodyText);
 
     if (parsed?.start_at && parsed?.end_at) {
-      return parsed;
+      return { ...parsed, summary_input: bodyText || null };
     }
   }
 
@@ -51,7 +44,7 @@ async function extractEventPeriod({ liveDate, name, bodyHtml, bodyText }) {
     });
 
     if (parsed?.start_at && parsed?.end_at) {
-      return parsed;
+      return { ...parsed, summary_input: bodyText };
     }
   }
 
@@ -65,13 +58,14 @@ async function extractEventPeriod({ liveDate, name, bodyHtml, bodyText }) {
     }
 
     if (ocrTexts.length) {
+      const ocrContent = ocrTexts.join("\n\n");
       const parsed = await extractEventPeriodWithAI({
         liveDate,
-        content: ocrTexts.join("\n\n"),
+        content: ocrContent,
       });
 
       if (parsed?.start_at && parsed?.end_at) {
-        return parsed;
+        return { ...parsed, summary_input: ocrContent };
       }
     }
   }
@@ -101,7 +95,6 @@ export async function runEventsPipeline() {
 
   console.log(`[events] ${newItems.length} new item(s) to process`);
 
-  let kmsList = null;
   const eventRows = [];
   const nonEventRows = [];
 
@@ -116,7 +109,6 @@ export async function runEventsPipeline() {
     const liveDate = detail.liveDate ?? null;
     const bodyHtml = detail.body ?? "";
     const bodyText = extractBodyText(bodyHtml);
-    const firstHeading = extractFirstH2Text(bodyHtml);
     const imageThumbnail = detail.imageThumbnail ?? null;
 
     const parsed = await extractEventPeriod({
@@ -128,19 +120,14 @@ export async function runEventsPipeline() {
 
     if (parsed?.start_at && parsed?.end_at) {
       const gms_url = buildGmsUrl(id, name);
-      let kms_url = null;
 
-      if (!shouldSkipKmsMatch(name)) {
-        if (!kmsList) {
-          kmsList = await fetchKmsEventList();
-        }
-
-        kms_url = await findKmsUrl({
-          primaryName: name,
-          firstHeading,
-          kmsList,
-        });
-      }
+      const summary = parsed.summary_input
+        ? await generateEventSummaryWithAI({
+            name,
+            liveDate,
+            content: parsed.summary_input,
+          })
+        : null;
 
       eventRows.push({
         id,
@@ -150,7 +137,7 @@ export async function runEventsPipeline() {
         start_at: parsed.start_at,
         end_at: parsed.end_at,
         gms_url,
-        kms_url,
+        summary,
       });
 
       console.log(

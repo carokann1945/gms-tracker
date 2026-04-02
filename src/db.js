@@ -87,7 +87,8 @@ export async function getProcessedIds(ids) {
  *   start_at?: string|null,
  *   end_at?: string|null,
  *   gms_url?: string|null,
- *   kms_url?: string|null
+ *   kms_url?: string|null,
+ *   summary?: string|null
  * }>} rows
  */
 export async function upsertEvents(rows) {
