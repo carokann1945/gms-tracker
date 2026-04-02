@@ -19,7 +19,7 @@ import vision from '@google-cloud/vision';          // default import (third-par
 **Export style** (`src/fetcher.js`, `src/db.js`, `src/parser.js`, `src/ai.js`, `src/ocr.js`, `src/matcher.js`):
 ```js
 export async function fetchNewsList() { ... }
-export async function getExistingIds(ids) { ... }
+export async function getProcessedIds(ids) { ... }
 export function sleep(ms) { ... }
 ```
 
@@ -71,7 +71,7 @@ Each network boundary has an independent `try/catch`. Errors are logged with a `
 **Rethrow pattern** — used in `src/db.js` where DB failure should halt the pipeline:
 ```js
 } catch (err) {
-  console.error('[db] getExistingIds error:', err.message);
+  console.error('[db] getProcessedIds error:', err.message);
   throw err;
 }
 ```
@@ -122,11 +122,11 @@ if (!text) return null;
 
 **Files:** `camelCase.js` for all modules in `src/` (`ai.js`, `db.js`, `fetcher.js`, `matcher.js`, `ocr.js`, `parser.js`).
 
-**Functions:** `camelCase` verbs — `fetchNewsList`, `fetchEventDetail`, `fetchKmsEventList`, `extractTextFromImage`, `extractBodyText`, `extractBodyImageUrls`, `extractEventPeriodWithAI`, `buildGmsUrl`, `findKmsUrl`, `getExistingIds`, `getMaxSourceIndex`, `upsertEvents`, `parseOngoingEvents`, `parseClosedEvents`.
+**Functions:** `camelCase` verbs — `fetchNewsList`, `fetchEventDetail`, `fetchKmsEventList`, `extractTextFromImage`, `extractBodyText`, `extractBodyImageUrls`, `extractEventPeriodWithAI`, `buildGmsUrl`, `findKmsUrl`, `getProcessedIds`, `upsertEvents`, `parseOngoingEvents`, `parseClosedEvents`.
 
 **Constants:** `UPPER_SNAKE_CASE` at module scope — `THROTTLE_MS`, `OCR_LIMIT`, `NEWS_LIST_URL`, `NEWS_DETAIL_URL`, `NEXON_BASE`, `TABLE`, `PROMPT`.
 
-**Variables:** `camelCase` — `newItems`, `existingIds`, `bodyHtml`, `event_period` (exception: DB row field names use `snake_case` to match Supabase column names: `event_period`, `image_url`, `gms_url`, `kms_url`, `source_index`).
+**Variables:** `camelCase` — `newItems`, `existingIds`, `bodyHtml`, `liveDate` (exception: DB row field names use `snake_case` to match Supabase column names such as `live_date`, `image_thumbnail`, `start_at`, `end_at`, `gms_url`, `kms_url`; `source_index` remains in maintenance rows).
 
 **Private module-level singletons:** prefixed with underscore — `_client` in both `src/db.js` and `src/ocr.js`.
 ```js

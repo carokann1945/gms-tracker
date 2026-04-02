@@ -1,7 +1,16 @@
-import { load } from 'cheerio';
+import { load } from "cheerio";
 
-const NEWS_LIST_URL = 'https://g.nexonstatic.com/maplestory/cms/v1/news';
-const NEWS_DETAIL_URL = 'https://g.nexonstatic.com/maplestory/cms/v1/news';
+const CMS_API_URL = "https://g.nexonstatic.com/maplestory/cms/v1/news";
+const NEXON_BASE = "https://g.nexonstatic.com";
+
+// image_thumbnail의 완전한 주소 반환용
+function toAbsoluteCmsUrl(url) {
+  if (!url) return null;
+  if (url.startsWith("http://") || url.startsWith("https://")) {
+    return url;
+  }
+  return `${NEXON_BASE}${url.startsWith("/") ? "" : "/"}${url}`;
+}
 
 /**
  * KMS 이벤트 페이지 HTML을 fetch하여 텍스트로 반환한다.
@@ -12,11 +21,14 @@ const NEWS_DETAIL_URL = 'https://g.nexonstatic.com/maplestory/cms/v1/news';
 async function fetchKmsPage(url) {
   const res = await fetch(url, {
     headers: {
-      'User-Agent': 'Mozilla/5.0 (compatible; gms-tracker/1.0)',
-      'Accept': 'text/html,application/xhtml+xml',
+      "User-Agent": "Mozilla/5.0 (compatible; gms-tracker/1.0)",
+      Accept: "text/html,application/xhtml+xml",
     },
   });
-  if (!res.ok) throw new Error(`KMS fetch failed: ${res.status} ${res.statusText} (${url})`);
+  if (!res.ok)
+    throw new Error(
+      `KMS fetch failed: ${res.status} ${res.statusText} (${url})`,
+    );
   return res.text();
 }
 
@@ -29,11 +41,11 @@ async function fetchKmsPage(url) {
 function parseOngoingEvents(html) {
   const $ = load(html);
   const events = [];
-  $('dt a[href]').each((i, el) => {
-    const href = $(el).attr('href');
+  $("dt a[href]").each((i, el) => {
+    const href = $(el).attr("href");
     const match = href?.match(/^\/News\/Event\/(\d+)$/);
     if (!match) return;
-    const title = $(el).text().replace(/\s+/g, ' ').trim();
+    const title = $(el).text().replace(/\s+/g, " ").trim();
     if (title) events.push({ id: match[1], name: title });
   });
   return events;
@@ -49,12 +61,16 @@ function parseOngoingEvents(html) {
 function parseClosedEvents(html) {
   const $ = load(html);
   const events = [];
-  $('dd.data').each((i, el) => {
+  $("dd.data").each((i, el) => {
     const link = $(el).find('a[href*="/News/Event/Closed/"]').first();
-    const href = link.attr('href');
+    const href = link.attr("href");
     const match = href?.match(/\/News\/Event\/Closed\/(\d+)/);
     if (!match) return;
-    const title = $(el).find('em.event_listMt').text().replace(/\s+/g, ' ').trim();
+    const title = $(el)
+      .find("em.event_listMt")
+      .text()
+      .replace(/\s+/g, " ")
+      .trim();
     if (title) events.push({ id: match[1], name: title });
   });
   return events;
@@ -65,28 +81,25 @@ export function sleep(ms) {
 }
 
 /**
- * Nexon 뉴스 목록 API에서 이벤트 카테고리 상위 10개를 반환한다.
+ * Nexon 뉴스 목록 API 전체 반환
  * @returns {Promise<Array<{id: string, [key: string]: any}>>}
  */
 export async function fetchNewsList() {
   try {
-    const res = await fetch(NEWS_LIST_URL);
+    const res = await fetch(CMS_API_URL);
     if (!res.ok) {
-      throw new Error(`News list fetch failed: ${res.status} ${res.statusText}`);
+      throw new Error(
+        `News list fetch failed: ${res.status} ${res.statusText}`,
+      );
     }
-    const data = await res.json();
 
-    // API 응답 구조에 따라 items 배열 추출 (배열이거나 { items: [] } 형태)
+    const data = await res.json();
     const items = Array.isArray(data) ? data : (data.items ?? data.data ?? []);
 
-    const events = items
-      .filter((item) => item.category === 'events')
-      .slice(0, 10);
-
-    console.log(`[fetcher] Fetched ${items.length} news items, ${events.length} events (top 10)`);
-    return events;
+    console.log(`[fetcher] Fetched ${items.length} news items`);
+    return items;
   } catch (err) {
-    console.error('[fetcher] fetchNewsList error:', err.message);
+    console.error("[fetcher] fetchNewsList error:", err.message);
     throw err;
   }
 }
@@ -103,7 +116,7 @@ export async function fetchKmsEventList() {
   try {
     // 1. Ongoing events (단일 페이지 — 페이지네이션 불필요)
     const ongoingHtml = await fetchKmsPage(
-      'https://maplestory.nexon.com/News/Event/Ongoing'
+      "https://maplestory.nexon.com/News/Event/Ongoing",
     );
     events.push(...parseOngoingEvents(ongoingHtml));
     console.log(`[fetcher] KMS ongoing: ${events.length} events`);
@@ -114,16 +127,18 @@ export async function fetchKmsEventList() {
     while (page <= 20) {
       await sleep(500); // Nexon 서버 보호용 throttle
       const html = await fetchKmsPage(
-        `https://maplestory.nexon.com/News/Event/Closed?page=${page}`
+        `https://maplestory.nexon.com/News/Event/Closed?page=${page}`,
       );
       const pageEvents = parseClosedEvents(html);
       if (pageEvents.length === 0) break;
       events.push(...pageEvents);
-      console.log(`[fetcher] KMS closed page ${page}: ${pageEvents.length} events`);
+      console.log(
+        `[fetcher] KMS closed page ${page}: ${pageEvents.length} events`,
+      );
       page++;
     }
   } catch (err) {
-    console.error('[fetcher] fetchKmsEventList error:', err.message);
+    console.error("[fetcher] fetchKmsEventList error:", err.message);
     // 에러 이전까지 수집된 이벤트 반환 (graceful degradation)
   }
 
@@ -137,39 +152,60 @@ export async function fetchKmsEventList() {
  */
 export async function fetchMaintenanceList() {
   try {
-    const res = await fetch(NEWS_LIST_URL);
+    const res = await fetch(CMS_API_URL);
     if (!res.ok) {
-      throw new Error(`Maintenance list fetch failed: ${res.status} ${res.statusText}`);
+      throw new Error(
+        `Maintenance list fetch failed: ${res.status} ${res.statusText}`,
+      );
     }
     const data = await res.json();
 
     const items = Array.isArray(data) ? data : (data.items ?? data.data ?? []);
 
     const maintenance = items
-      .filter((item) => item.category === 'maintenance')
+      .filter((item) => item.category === "maintenance")
       .slice(0, 5);
 
-    console.log(`[fetcher] Fetched ${items.length} news items, ${maintenance.length} maintenance (top 5)`);
+    console.log(
+      `[fetcher] Fetched ${items.length} news items, ${maintenance.length} maintenance (top 5)`,
+    );
     return maintenance;
   } catch (err) {
-    console.error('[fetcher] fetchMaintenanceList error:', err.message);
+    console.error("[fetcher] fetchMaintenanceList error:", err.message);
     throw err;
   }
 }
 
 /**
- * 단일 이벤트 상세 API를 호출하여 상세 데이터를 반환한다.
+ * 개별 이벤트 상세 API를 호출하여 상세 데이터를 반환한다.
+ * 정규화 해서 사용.
  * @param {string} id
- * @returns {Promise<object | null>}
+ * @returns {Promise<{
+ *   id: string,
+ *   name: string,
+ *   liveDate: string|null,
+ *   body: string,
+ *   imageThumbnail: string|null,
+ * } | null>}
  */
 export async function fetchEventDetail(id) {
   try {
-    const res = await fetch(`${NEWS_DETAIL_URL}/${id}`);
+    const res = await fetch(`${CMS_API_URL}/${id}`);
     if (!res.ok) {
-      throw new Error(`Detail fetch failed for id=${id}: ${res.status} ${res.statusText}`);
+      throw new Error(
+        `Detail fetch failed for id=${id}: ${res.status} ${res.statusText}`,
+      );
     }
     const data = await res.json();
-    return data;
+    return {
+      id: String(data.id ?? id),
+      name: data.name ?? data.title ?? "",
+      liveDate: data.liveDate ?? data.live_date ?? null,
+      body: data.body ?? "",
+      imageThumbnail: toAbsoluteCmsUrl(
+        data.imageThumbnail ?? data.image_thumbnail ?? null,
+      ),
+    };
   } catch (err) {
     console.error(`[fetcher] fetchEventDetail error (id=${id}):`, err.message);
     return null;

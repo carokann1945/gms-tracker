@@ -25,12 +25,9 @@ _Last updated: 2026-03-30_
 - Returns `Array<{id, ...rawFields}>`; re-throws on error (fatal)
 
 ### Stage 2 — Deduplication check
-- **Module:** `src/db.js` → `getExistingIds(ids)`
-- Queries the Supabase `events` table for which of the 10 IDs already exist
+- **Module:** `src/db.js` → `getProcessedIds(ids)`
+- Queries the Supabase `events` and `non_events` tables for which candidate IDs have already been classified
 - Only items absent from DB continue through the pipeline (idempotency guarantee)
-- **Module:** `src/db.js` → `getMaxSourceIndex()`
-- Queries current max `source_index` value once; used to assign monotonically increasing indices to new rows
-- `newItems[0]` (most recent in API order) receives `currentMax + length` (highest), so ordering by `source_index DESC` reflects recency
 
 ### Stage 3 — Fetch KMS event list (pre-loop, single load)
 - **Module:** `src/fetcher.js` → `fetchKmsEventList()`
@@ -83,7 +80,7 @@ _Last updated: 2026-03-30_
 ### Stage 8 — Upsert to Supabase
 - **Module:** `src/db.js` → `upsertEvents(rows)`
 - Batch upserts all processed rows to the `events` table with `onConflict: 'id'`
-- Row shape: `{ id, name, image_url, event_period, gms_url, kms_url, source_index }`
+- Row shape: `{ id, name, live_date, image_thumbnail, start_at, end_at, gms_url, kms_url }`
 
 ---
 
@@ -96,8 +93,7 @@ Nexon GMS News API
 fetchNewsList()            ← top 10 events, category=events
        │
        ▼
-getExistingIds()           ← filter to new IDs only (Supabase read)
-getMaxSourceIndex()        ← compute source_index base (Supabase read)
+getProcessedIds()          ← filter to new IDs only (Supabase read)
        │
        ▼
 fetchKmsEventList()        ← load KMS events once (ongoing + ≤20 closed pages)
@@ -125,8 +121,8 @@ fetchKmsEventList()        ← load KMS events once (ongoing + ≤20 closed page
        └── buildGmsUrl(id, name)              ← pure, no I/O
               │
               ▼
-         row assembled: { id, name, image_url, event_period,
-                          gms_url, kms_url, source_index }
+         row assembled: { id, name, live_date, image_thumbnail,
+                          start_at, end_at, gms_url, kms_url }
        │
        ▼
 upsertEvents(rows)         ← Supabase batch upsert, onConflict='id'
@@ -143,8 +139,7 @@ Each module uses an independent `try-catch` block. Fatality is determined by whe
 | `src/fetcher.js` `fetchNewsList` | re-throws | Fatal — `main()` exits |
 | `src/fetcher.js` `fetchEventDetail` | returns `null` | Non-fatal — item skipped |
 | `src/fetcher.js` `fetchKmsEventList` | logs, returns partial list | Non-fatal — degraded matching |
-| `src/db.js` `getExistingIds` | re-throws | Fatal — `main()` exits |
-| `src/db.js` `getMaxSourceIndex` | re-throws | Fatal — `main()` exits |
+| `src/db.js` `getProcessedIds` | re-throws | Fatal — `main()` exits |
 | `src/db.js` `upsertEvents` | re-throws | Fatal — `main()` exits |
 | `src/ai.js` `extractEventPeriodWithAI` | returns `null` | Non-fatal — period stays null |
 | `src/matcher.js` `findKmsUrl` | returns `null` | Non-fatal — kms_url stays null |
@@ -160,9 +155,6 @@ The SDK client is created on first call rather than at module load time. This av
 
 **KMS list loaded once, passed as argument to `findKmsUrl`:**
 `fetchKmsEventList()` runs once before the per-event loop and its result is passed as a parameter. This prevents N redundant scraping runs (one per event) and makes `findKmsUrl` a pure-input function.
-
-**`source_index` assignment (reverse order):**
-`newItems[0]` is the most-recent event at the top of the GMS API response. It receives `currentMax + length` (highest value), so `ORDER BY source_index DESC` in Supabase reflects chronological recency.
 
 **OCR cost control:**
 `OCR_LIMIT = 2` in `index.js` caps Google Vision API calls per event. Combined with the Layer-1 early break, OCR is only reached for events whose body text contains no parseable dates.
@@ -185,7 +177,7 @@ The SDK client is created on first call rather than at module load time. This av
 | `src/ai.js` | OpenAI client wrapper — single exported function for date period extraction via `gpt-4o-mini` |
 | `src/matcher.js` | OpenAI client wrapper — two-step translate-then-match for KMS URL lookup via `gpt-4o-mini` |
 | `src/ocr.js` | Google Cloud Vision wrapper — OCR text extraction from image URL |
-| `src/db.js` | Supabase wrapper — read existing IDs, read max source_index, batch upsert |
+| `src/db.js` | Supabase wrapper — read processed IDs, batch upsert |
 
 No `src/` module imports from another `src/` module. All cross-module wiring is in `index.js`.
 

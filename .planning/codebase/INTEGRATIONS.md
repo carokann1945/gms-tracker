@@ -189,8 +189,7 @@ return annotations[0]?.description ?? '';
 
 | Function | Query | Purpose |
 |---|---|---|
-| `getExistingIds(ids)` | `.from('events').select('id').in('id', ids)` | Returns `Set<string>` of already-stored IDs for deduplication |
-| `getMaxSourceIndex()` | `.from('events').select('source_index').order('source_index', { ascending: false }).limit(1)` | Gets current max ordering index for assigning monotonic order to new items |
+| `getProcessedIds(ids)` | `.from('events').select('id').in('id', ids)` + `.from('non_events').select('id').in('id', ids)` | Returns `Set<string>` of already-processed IDs for deduplication |
 | `upsertEvents(rows)` | `.from('events').upsert(rows, { onConflict: 'id' })` | Inserts or updates event rows; PK conflict on `id` |
 
 **Schema (inferred from upsert payload in `index.js`):**
@@ -199,15 +198,15 @@ return annotations[0]?.description ?? '';
 |---|---|---|
 | `id` | string (PK) | Nexon event ID (cast to string) |
 | `name` | string | `detail.name ?? detail.title ?? ''` |
-| `image_url` | string or null | `detail.imageThumbnail ?? null` |
-| `event_period` | string or null | AI-parsed date string or `null` |
+| `live_date` | string or null | `detail.liveDate ?? null` |
+| `image_thumbnail` | string or null | `detail.imageThumbnail ?? null` |
+| `start_at` | string | Parsed event start datetime |
+| `end_at` | string | Parsed event end datetime |
 | `gms_url` | string | Built by `src/parser.js:buildGmsUrl(id, name)` → `https://www.nexon.com/maplestory/news/events/{id}/{slug}` |
 | `kms_url` | string or null | `https://maplestory.nexon.com/News/Event/{matchedId}` or `null` |
-| `source_index` | number or null | Monotonically increasing integer; newest item gets highest value |
 
 **Error handling:**
-- `getExistingIds()` and `upsertEvents()` both rethrow on Supabase errors — these halt the pipeline (critical path)
-- `getMaxSourceIndex()` rethrows on error
+- `getProcessedIds()` and `upsertEvents()` both rethrow on Supabase errors — these halt the pipeline (critical path)
 
 ---
 

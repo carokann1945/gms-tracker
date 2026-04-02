@@ -186,8 +186,8 @@ export async function runMaintenancePipeline() {
       if (!detail) continue;
 
       const id = String(detail.id);
-      const name = detail.name ?? detail.title ?? '';
-      const bodyText = extractBodyText(detail.body ?? '');
+      const name = detail.name;
+      const bodyText = extractBodyText(detail.body);
       const { start_at, end_at } = parseMaintenanceTimes(bodyText);
 
       console.log(`[maintenance] id=${id} → start_at="${start_at ?? 'not found'}" end_at="${end_at ?? 'not found'}"`);
