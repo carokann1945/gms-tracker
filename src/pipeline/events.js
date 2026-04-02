@@ -17,8 +17,8 @@ import { isHotWeekNotice, parseHotWeekDates } from "../domain/hotWeek.js";
 import { findKmsUrl } from "../matcher.js";
 
 const THROTTLE_MS = 500;
-const OCR_LIMIT = 4;
-const EVENT_LIMIT = 20;
+const OCR_LIMIT = 30;
+const EVENT_LIMIT = 6;
 
 function isEligibleEventItem(item) {
   const isEvent = item.category === "events";
