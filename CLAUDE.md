@@ -9,10 +9,12 @@ GMS 뉴스에서 이벤트/점검 기간을 추출해 Supabase에 적재하는 N
 
 ## 필수 환경변수
 
-- `OPENAI_API_KEY`
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `GOOGLE_APPLICATION_CREDENTIALS`
+- `OPENAI_API_KEY` — `AI_PROVIDER=openai`일 때 필요
+- `GEMINI_API_KEY` — `AI_PROVIDER=gemini`일 때 필요
+- `AI_PROVIDER` — `openai` 또는 `gemini` (기본값: `openai`)
 
 ## 동작 요약
 

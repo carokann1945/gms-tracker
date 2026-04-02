@@ -11,7 +11,7 @@ import { isHotWeekNotice, parseHotWeekDates } from "../domain/hotWeek.js";
 
 const THROTTLE_MS = 500;
 const OCR_LIMIT = 30;
-const EVENT_LIMIT = 10;
+const EVENT_LIMIT = 3;
 
 function isEligibleEventItem(item) {
   const isEvent = item.category === "events";

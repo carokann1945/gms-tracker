@@ -1,6 +1,11 @@
 import OpenAI from "openai";
+import { GoogleGenAI, Type } from "@google/genai";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const GEMINI_MODEL = "gemini-2.5-flash";
+
+const useGemini = process.env.AI_PROVIDER === "gemini";
 
 function buildEventSummaryPrompt({ name, liveDate, content }) {
   return `
@@ -18,50 +23,41 @@ Do not omit either key.
 Do not add any extra keys.
 Do not output any text before or after the JSON.
 
-Valid example:
-{
-  "summary": "...\n\n**이벤트 요약**\n* **섹션 이름**: 행동 → 보상",
-  "translation": "..."
-}
+⚠️ IMPORTANT JSON RULE ⚠️
+To maximize readability, you MUST use "\\n\\n" inside the JSON string to create line breaks and separate paragraphs.
 
-Invalid examples:
-{
-  "summary": "..."
-}
-
-{
-  "translation": "..."
-}
-
-{
-  "summary": { "text": "..." },
-  "translation": "..."
-}
+━━━━━━━━━━━━━━━━━━━━━━━
+[GLOBAL RULES]
+- **TIME CONVERSION**: You MUST convert ALL dates and times mentioned in the content (e.g., UTC, PST, PDT) to Korean Standard Time (KST, UTC+9).
+- Format the converted times naturally in Korean, for example: "2026년 4월 15일 오전 9시". Do not output original UTC times.
 
 ━━━━━━━━━━━━━━━━━━━━━━━
 [SUMMARY RULES]
-The "summary" string must be highly readable and strictly follow this Markdown structure:
+The "summary" string must be highly readable Markdown text that naturally explains the event.
 
-**한줄 요약**
-(Write exactly ONE short, punchy sentence summarizing the core update or event in natural Korean.)
-
-**이벤트 요약**
-(Write the event summary as natural, flowing paragraphs. Do NOT use rigid section headers like '* **[섹션 이름]**'.)
-
-- Explain "Who can participate", "What you need to do", and "What you can get" naturally, weaving them together in a conversational yet highly informative tone.
-- Just write it like a human summarizing an event. For example: "이번 이벤트는 101레벨 이상 유저들이 참여할 수 있으며, 매일 레벨 범위 몬스터를 처치해 출석 체크를 하는 방식입니다. 꾸준히 참여하면 성장에 필요한 다양한 아이템과 함께 한정판 코디 보상을 얻을 수 있습니다."
-- Avoid robotic listing. 
-- You may use simple bullet points (-) ONLY IF you need to list a few key core rewards, but the main explanation must be human-like paragraphs.
+1. Do NOT write a one-line summary. Start directly with the main explanation.
+2. Include ALL core information: "Who can participate", "What you need to do", and "What you can get".
+3. **EXTREME READABILITY**:
+   - Write in a natural, conversational Korean tone (e.g., "~할 수 있습니다.", "~하는 방식입니다.").
+   - Do NOT write a massive wall of text. You MUST press Enter (use "\\n\\n") to separate sentences or concepts.
+   - Separate "Participation Conditions", "How to Play", and "Rewards" into their own distinct paragraphs.
+   - Use **bold text** strategically to highlight important numbers, item names, or rules.
+   - Use simple bullet points (-) ONLY when listing multiple key rewards cleanly.
 
 ━━━━━━━━━━━━━━━━━━━━━━━
 [TRANSLATION RULES]
-The "translation" string must be a FULL, 100% complete Korean translation of the provided content.
+The "translation" string must be a Korean translation of the provided content, optimized for reading speed and clarity.
 
-- NO omissions, NO summarization. Preserve all details, conditions, dates, notes, and warnings.
-- Convert HTML/UI elements into clean, structured Markdown.
-- Use appropriate Markdown headings (###, ####), bullet points, and Markdown tables to maximize readability.
-- Keep reward tables and structures visually clean.
-- If the original content is already in Korean, refine and restructure it into highly readable Markdown without losing any information.
+1. **General Content**: For event duration, conditions, and how to play, preserve all details, notes, and warnings. NO omissions here.
+2. **EXCEPTION - COMPACT REWARDS**: You MUST summarize the "Event Rewards" (이벤트 보상) section extremely compactly to save processing time.
+   - Omit repetitive boilerplate text like "월드 내 교환 가능" (Tradeable within world) or exact expiration dates/times (e.g., "2026년 4월 15일 만료") UNLESS it is a highly unique or critical restriction.
+   - Only translate the Core Item Name and Quantity (e.g., "3회: 메이플스토리 x 원펀맨 가구 상자 I").
+   - Strip out long descriptions of what the items do (e.g., skip the explanation of what a 'Karma Bright Cube' does) unless it's a completely new, event-specific mechanic.
+3. **EXTREME READABILITY**:
+   - Convert unstructured text/HTML into beautiful, well-structured Markdown.
+   - Use appropriate Markdown headings (###, ####) to create a clear visual hierarchy.
+   - Use bullet points (-) and line breaks ("\\n\\n") generously to prevent text walls.
+   - If the original content is already in Korean, refine and restructure it into highly readable Markdown without losing any core information.
 
 ━━━━━━━━━━━━━━━━━━━━━━━
 [CONTENT TO PROCESS]
@@ -101,36 +97,60 @@ export async function generateEventSummaryWithAI({ name, liveDate, content }) {
   if (!name || !content) return null;
 
   try {
-    const response = await client.chat.completions.create({
-      model: "gpt-4o-mini",
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "event_summary",
-          strict: true,
-          schema: {
-            type: "object",
+    let result;
+
+    if (useGemini) {
+      const response = await gemini.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: buildEventSummaryPrompt({ name, liveDate, content }),
+        config: {
+          systemInstruction: "Return JSON only.",
+          temperature: 0.2,
+          maxOutputTokens: 65536,
+          responseMimeType: "application/json",
+          responseJsonSchema: {
+            type: Type.OBJECT,
             properties: {
-              summary: { type: "string" },
-              translation: { type: "string" },
+              summary: { type: Type.STRING },
+              translation: { type: Type.STRING },
             },
             required: ["summary", "translation"],
-            additionalProperties: false,
           },
         },
-      },
-      temperature: 0.2,
-      max_tokens: 8000,
-      messages: [
-        { role: "system", content: "Return JSON only." },
-        {
-          role: "user",
-          content: buildEventSummaryPrompt({ name, liveDate, content }),
+      });
+      result = response.text;
+    } else {
+      const response = await client.chat.completions.create({
+        model: "gpt-4o-mini",
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "event_summary",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: {
+                summary: { type: "string" },
+                translation: { type: "string" },
+              },
+              required: ["summary", "translation"],
+              additionalProperties: false,
+            },
+          },
         },
-      ],
-    });
+        temperature: 0.2,
+        max_tokens: 16384,
+        messages: [
+          { role: "system", content: "Return JSON only." },
+          {
+            role: "user",
+            content: buildEventSummaryPrompt({ name, liveDate, content }),
+          },
+        ],
+      });
+      result = response.choices[0]?.message?.content?.trim();
+    }
 
-    const result = response.choices[0]?.message?.content?.trim();
     if (!result) return null;
 
     const parsed = JSON.parse(result);
@@ -154,21 +174,37 @@ export async function extractEventPeriodWithAI({ liveDate, content }) {
   if (!liveDate || !content) return null;
 
   try {
-    const response = await client.chat.completions.create({
-      model: "gpt-4o-mini",
-      response_format: { type: "json_object" },
-      temperature: 0,
-      max_tokens: 1000,
-      messages: [
-        { role: "system", content: "Return JSON only." },
-        {
-          role: "user",
-          content: buildEventPeriodPrompt({ liveDate, content }),
-        },
-      ],
-    });
+    let result;
 
-    const result = response.choices[0]?.message?.content?.trim();
+    if (useGemini) {
+      const response = await gemini.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: buildEventPeriodPrompt({ liveDate, content }),
+        config: {
+          systemInstruction: "Return JSON only.",
+          temperature: 0,
+          maxOutputTokens: 65536,
+          responseMimeType: "application/json",
+        },
+      });
+      result = response.text;
+    } else {
+      const response = await client.chat.completions.create({
+        model: "gpt-4o-mini",
+        response_format: { type: "json_object" },
+        temperature: 0,
+        max_tokens: 1000,
+        messages: [
+          { role: "system", content: "Return JSON only." },
+          {
+            role: "user",
+            content: buildEventPeriodPrompt({ liveDate, content }),
+          },
+        ],
+      });
+      result = response.choices[0]?.message?.content?.trim();
+    }
+
     if (!result) return null;
 
     const parsed = JSON.parse(result);
