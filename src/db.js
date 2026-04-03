@@ -23,26 +23,31 @@ function getClient() {
 }
 
 /**
- * 주어진 id 배열 중 DB에 이미 존재하는 id를 Set으로 반환한다.
+ * 주어진 id 배열 중 events_v2에 이미 존재하는 항목을 Map<id, name>으로 반환한다.
  * @param {string[]} ids
- * @returns {Promise<Set<string>>}
+ * @returns {Promise<Map<string, string>>}
  */
-export async function getExistingEventIds(ids) {
-  if (!ids.length) return new Set();
+export async function getExistingEventMap(ids) {
+  if (!ids.length) return new Map();
 
   try {
     const client = getClient();
-    const { data, error } = await client.from(TABLE).select("id").in("id", ids);
+    const { data, error } = await client
+      .from(TABLE)
+      .select("id, name")
+      .in("id", ids);
 
     if (error) throw error;
 
-    const existing = new Set((data ?? []).map((row) => row.id));
+    const existing = new Map(
+      (data ?? []).map((row) => [String(row.id), row.name ?? ""]),
+    );
     console.log(
-      `[db] ${existing.size} of ${ids.length} ids already exist in DB`,
+      `[db] ${existing.size} of ${ids.length} ids already exist in events_v2`,
     );
     return existing;
   } catch (err) {
-    console.error("[db] getExistingEventIds error:", err.message);
+    console.error("[db] getExistingEventMap error:", err.message);
     throw err;
   }
 }
@@ -60,21 +65,25 @@ export async function getExistingNonEventIds(ids) {
 
     if (error) throw error;
 
-    return new Set((data ?? []).map((row) => row.id));
+    const existing = new Set((data ?? []).map((row) => String(row.id)));
+    console.log(
+      `[db] ${existing.size} of ${ids.length} ids already exist in non_events_v2`,
+    );
+
+    return existing;
   } catch (err) {
     console.error("[db] getExistingNonEventIds error:", err.message);
     throw err;
   }
 }
 
-// 익시스팅 논이벤트 합치기
-export async function getProcessedIds(ids) {
-  const [eventIds, nonEventIds] = await Promise.all([
-    getExistingEventIds(ids),
+export async function getProcessed(ids) {
+  const [eventMap, nonEventSet] = await Promise.all([
+    getExistingEventMap(ids),
     getExistingNonEventIds(ids),
   ]);
 
-  return new Set([...eventIds, ...nonEventIds]);
+  return { eventMap, nonEventSet };
 }
 
 /**

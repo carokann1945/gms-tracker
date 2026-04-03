@@ -1,5 +1,5 @@
 import { fetchNewsList, fetchEventDetail, sleep } from "../fetcher.js";
-import { getProcessedIds, upsertEvents, upsertNonEvents } from "../db.js";
+import { getProcessed, upsertEvents, upsertNonEvents } from "../db.js";
 import {
   extractBodyText,
   extractBodyImageUrls,
@@ -83,10 +83,13 @@ export async function runEventsPipeline() {
   }
 
   const ids = candidates.map((item) => String(item.id));
-  const processedIds = await getProcessedIds(ids);
-  const newItems = candidates.filter(
-    (item) => !processedIds.has(String(item.id)),
-  );
+  const { eventMap, nonEventSet } = await getProcessed(ids);
+  const newItems = candidates.filter((item) => {
+    const id = String(item.id);
+    if (nonEventSet.has(id)) return false;
+    const storedName = eventMap.get(id);
+    return storedName === undefined || storedName !== item.name;
+  });
 
   if (!newItems.length) {
     console.log("[events] No new items to process.");
