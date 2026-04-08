@@ -1,23 +1,14 @@
-import { fetchNewsList, fetchEventDetail, sleep } from "../fetcher.js";
-import { getProcessed, upsertEvents, upsertNonEvents } from "../db.js";
-import {
-  extractBodyText,
-  extractBodyImageUrls,
-  buildGmsUrl,
-} from "../parser.js";
-import { extractTextFromImage } from "../ocr.js";
-import { extractEventPeriodWithAI, generateEventSummaryWithAI } from "../ai.js";
-import { isHotWeekNotice, parseHotWeekDates } from "../domain/hotWeek.js";
+import { fetchEventsList } from "./fetcher.js";
+import { getProcessed, upsertEvents, upsertNonEvents } from "./repository.js";
+import { extractBodyImageUrls, buildGmsUrl } from "./parser.js";
+import { extractEventPeriodWithAI, generateEventSummaryWithAI } from "./ai.js";
+import { isHotWeekNotice, parseHotWeekDates } from "./hotWeek.js";
+import { extractBodyText } from "../../lib/parser.js";
+import { fetchEventDetail, sleep } from "../../lib/fetcher.js";
+import { extractTextFromImage } from "../../lib/ocr.js";
 
 const THROTTLE_MS = 500;
 const OCR_LIMIT = 30;
-const EVENT_LIMIT = 20;
-
-function isEligibleEventItem(item) {
-  const isEvent = item.category === "events";
-  const isAllowedMode = item.isMSCW === false || item.isMSCW == null;
-  return isEvent && isAllowedMode;
-}
 
 async function extractEventPeriod({ liveDate, name, bodyHtml, bodyText }) {
   const hotWeek = isHotWeekNotice(name, bodyText);
@@ -67,8 +58,7 @@ async function extractEventPeriod({ liveDate, name, bodyHtml, bodyText }) {
 }
 
 export async function runEventsPipeline() {
-  const items = await fetchNewsList();
-  const candidates = items.filter(isEligibleEventItem).slice(0, EVENT_LIMIT);
+  const candidates = await fetchEventsList();
 
   if (!candidates.length) {
     console.log("[events] No event items found.");

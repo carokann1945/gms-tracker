@@ -1,6 +1,6 @@
 import "dotenv/config";
-import { runEventsPipeline } from "./src/pipeline/events.js";
-import { runMaintenancePipeline } from "./src/maintenance.js";
+import { runMaintenancePipeline } from "./features/maintenance/pipeline.js";
+import { runEventsPipeline } from "./features/events/pipeline.js";
 
 async function main() {
   // 이벤트 파이프라인 실행

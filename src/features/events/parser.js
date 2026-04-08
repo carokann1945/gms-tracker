@@ -1,18 +1,4 @@
-import { load } from "cheerio";
-
 const NEXON_BASE = "https://g.nexonstatic.com";
-
-/**
- * HTML body에서 순수 텍스트만 추출한다. (1계층 파싱용)
- * @param {string} bodyHtml
- * @returns {string}
- */
-export function extractBodyText(bodyHtml) {
-  if (!bodyHtml) return "";
-  const $ = load(bodyHtml);
-  $("br").replaceWith(" ");
-  return $("body").text().replace(/\s+/g, " ").trim();
-}
 
 /**
  * HTML body에서 <img src="..."> URL을 추출하여 절대 경로로 반환한다.
@@ -45,6 +31,6 @@ export function extractBodyImageUrls(bodyHtml) {
  * @param {string} name
  * @returns {string}
  */
-export function buildGmsUrl(id, name) {
+export function buildGmsUrl(id) {
   return `https://www.nexon.com/maplestory/news/events/${id}`;
 }

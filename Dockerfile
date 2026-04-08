@@ -14,4 +14,4 @@ RUN pnpm install --frozen-lockfile --prod
 # 3. 실제 소스 코드 복사
 COPY . .
 
-CMD ["node", "index.js"]
+CMD ["node", "src/main.js"]
