@@ -10,25 +10,8 @@ const NEXON_BASE = "https://g.nexonstatic.com";
 export function extractBodyText(bodyHtml) {
   if (!bodyHtml) return "";
   const $ = load(bodyHtml);
+  $("br").replaceWith(" ");
   return $("body").text().replace(/\s+/g, " ").trim();
-}
-
-/**
- * HTML body에서 첫 번째 h2 텍스트를 추출한다.
- * 비어 있거나 h2가 없으면 null을 반환한다.
- * @param {string} bodyHtml
- * @returns {string|null}
- */
-export function extractFirstH2Text(bodyHtml) {
-  if (!bodyHtml) return null;
-
-  const $ = load(bodyHtml);
-  const firstH2 = $("h2").first();
-
-  if (!firstH2.length) return null;
-
-  const text = firstH2.text().replace(/\s+/g, " ").trim();
-  return text || null;
 }
 
 /**

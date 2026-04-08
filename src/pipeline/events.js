@@ -19,13 +19,6 @@ function isEligibleEventItem(item) {
   return isEvent && isAllowedMode;
 }
 
-function shouldSkipKmsMatch(name) {
-  const normalizedName = name?.toLowerCase() ?? "";
-  return (
-    normalizedName.includes("miracle") || normalizedName.includes("hot week")
-  );
-}
-
 async function extractEventPeriod({ liveDate, name, bodyHtml, bodyText }) {
   const hotWeek = isHotWeekNotice(name, bodyText);
 
