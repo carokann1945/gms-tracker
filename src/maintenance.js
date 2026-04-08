@@ -1,27 +1,37 @@
-import { fetchMaintenanceList, fetchEventDetail, sleep } from './fetcher.js';
-import {
-  getExistingMaintenanceIds,
-  getMaxMaintenanceSourceIndex,
-  upsertMaintenance,
-} from './db.js';
-import { extractBodyText } from './parser.js';
+import { fetchMaintenanceList, fetchEventDetail, sleep } from "./fetcher.js";
+import { getExistingMaintenanceIds, upsertMaintenance } from "./db.js";
+import { extractBodyText } from "./parser.js";
+import { extractMaintenanceTimesWithAI } from "./ai.js";
 
 const THROTTLE_MS = 500;
 
 const MONTHS = {
-  January: 0, February: 1, March: 2, April: 3,
-  May: 4, June: 5, July: 6, August: 7,
-  September: 8, October: 9, November: 10, December: 11,
+  January: 0,
+  February: 1,
+  March: 2,
+  April: 3,
+  May: 4,
+  June: 5,
+  July: 6,
+  August: 7,
+  September: 8,
+  October: 9,
+  November: 10,
+  December: 11,
 };
 
 // extractBodyText()는 whitespace를 모두 space 1개로 collapse하므로
 // "Times: Thursday, March 26, 2026 PDT (UTC -7): 5:00 AM - 11:00 PM" 형태가 됨
 // UTC offset이 명시되지 않은 경우(e.g. "PST: 5:00 AM") TZ_OFFSET_MAP으로 fallback
 const TZ_OFFSET_MAP = {
-  PST: -8, PDT: -7,
-  EST: -5, EDT: -4,
-  MST: -7, MDT: -6,
-  CST: -6, CDT: -5,
+  PST: -8,
+  PDT: -7,
+  EST: -5,
+  EDT: -4,
+  MST: -7,
+  MDT: -6,
+  CST: -6,
+  CDT: -5,
 };
 
 // 캡처 그룹: (monthStr)(dayStr)(yearStr)(tzAbbr)(offsetStr?)(startTimeStr)(endTimeStr?)
@@ -36,25 +46,22 @@ const TIMES_RE =
  * @returns {boolean}
  */
 function isMaintenanceItem(name) {
-  return name.startsWith('Scheduled') || name.startsWith('Unscheduled');
+  return (
+    name.startsWith("Scheduled") ||
+    name.startsWith("Unscheduled") ||
+    name.startsWith("scheduled") ||
+    name.startsWith("unscheduled")
+  );
 }
 
 /**
  * maintenance 상세 페이지 URL을 생성한다.
  * buildGmsUrl과 동일한 slug 알고리즘, path만 /maintenance/.
  * @param {string|number} id
- * @param {string} name
  * @returns {string}
  */
-function buildMaintenanceUrl(id, name) {
-  const slug = name
-    .replace(/[^a-zA-Z0-9 ]/g, ' ')
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
-  return `https://www.nexon.com/maplestory/news/maintenance/${id}/${slug}`;
+function buildMaintenanceUrl(id) {
+  return `https://www.nexon.com/maplestory/news/maintenance/${id}`;
 }
 
 /**
@@ -69,8 +76,9 @@ function parseTime12(timeStr) {
   let hour = parseInt(m[1], 10);
   const minutes = parseInt(m[2], 10);
   const period = m[3].toUpperCase();
-  if (period === 'AM' && hour === 12) hour = 0;       // 12 AM → 자정(0시)
-  else if (period === 'PM' && hour !== 12) hour += 12; // PM → 24시간제 변환
+  if (period === "AM" && hour === 12)
+    hour = 0; // 12 AM → 자정(0시)
+  else if (period === "PM" && hour !== 12) hour += 12; // PM → 24시간제 변환
   return { hour, minutes };
 }
 
@@ -87,7 +95,18 @@ function parseMaintenanceTimes(bodyText) {
   const m = bodyText.match(TIMES_RE);
   if (!m) return { start_at: null, end_at: null };
 
-  const [, monthStr, dayStr, yearStr, tzAbbr, offsetStr, startTimeStr, endTimeStr, endMonthStr, endDayStr] = m;
+  const [
+    ,
+    monthStr,
+    dayStr,
+    yearStr,
+    tzAbbr,
+    offsetStr,
+    startTimeStr,
+    endTimeStr,
+    endMonthStr,
+    endDayStr,
+  ] = m;
 
   const month = MONTHS[monthStr];
   if (month === undefined) return { start_at: null, end_at: null };
@@ -108,7 +127,10 @@ function parseMaintenanceTimes(bodyText) {
   if (!startTime) return { start_at: null, end_at: null };
 
   const baseDayMs = Date.UTC(year, month, day);
-  const startMs = baseDayMs + (startTime.hour - offsetHours) * 3_600_000 + startTime.minutes * 60_000;
+  const startMs =
+    baseDayMs +
+    (startTime.hour - offsetHours) * 3_600_000 +
+    startTime.minutes * 60_000;
 
   let end_at = null;
   if (endTimeStr) {
@@ -126,7 +148,10 @@ function parseMaintenanceTimes(bodyText) {
           }
         }
       }
-      const endMs = endBaseDayMs + (endTime.hour - offsetHours) * 3_600_000 + endTime.minutes * 60_000;
+      const endMs =
+        endBaseDayMs +
+        (endTime.hour - offsetHours) * 3_600_000 +
+        endTime.minutes * 60_000;
       end_at = new Date(endMs).toISOString();
     }
   }
@@ -147,35 +172,32 @@ export async function runMaintenancePipeline() {
   // 1. maintenance 목록 상위 5개 가져오기
   const top5 = await fetchMaintenanceList();
   if (!top5.length) {
-    console.log('[maintenance] No maintenance items found.');
+    console.log("[maintenance] No maintenance items found.");
     return;
   }
 
   // 2. name 필터: "Scheduled" 또는 "Unscheduled"로 시작하는 항목만 저장 대상
-  const candidates = top5.filter((item) => isMaintenanceItem(item.name ?? ''));
+  const candidates = top5.filter((item) => isMaintenanceItem(item.name ?? ""));
   if (!candidates.length) {
-    console.log('[maintenance] No eligible maintenance items after name filter.');
+    console.log(
+      "[maintenance] No eligible maintenance items after name filter.",
+    );
     return;
   }
 
   // 3. DB에 이미 있는 id 확인 → 신규 항목만 추출
   const ids = candidates.map((item) => String(item.id));
   const existingIds = await getExistingMaintenanceIds(ids);
-  const newItems = candidates.filter((item) => !existingIds.has(String(item.id)));
+  const newItems = candidates.filter(
+    (item) => !existingIds.has(String(item.id)),
+  );
 
   if (!newItems.length) {
-    console.log('[maintenance] No new maintenance items to process.');
+    console.log("[maintenance] No new maintenance items to process.");
     return;
   }
 
   console.log(`[maintenance] ${newItems.length} new item(s) to process`);
-
-  // 전역 단조 증가 source_index: 신규 항목에 DB 현재 최댓값 이후 번호 부여
-  // newItems[0](최신) → currentMax + length (최고값), newItems[last] → currentMax + 1
-  const currentMax = await getMaxMaintenanceSourceIndex();
-  const sourceIndexMap = new Map(
-    newItems.map((item, i) => [String(item.id), currentMax + newItems.length - i])
-  );
 
   // 4. 신규 항목 상세 API 순차 호출 (0.5초 throttle)
   const rows = [];
@@ -188,25 +210,39 @@ export async function runMaintenancePipeline() {
       const id = String(detail.id);
       const name = detail.name;
       const bodyText = extractBodyText(detail.body);
-      const { start_at, end_at } = parseMaintenanceTimes(bodyText);
 
-      console.log(`[maintenance] id=${id} → start_at="${start_at ?? 'not found'}" end_at="${end_at ?? 'not found'}"`);
+      // LLM 1차 파싱, 실패 시 regex fallback
+      let times = await extractMaintenanceTimesWithAI({
+        liveDate: detail.liveDate,
+        content: bodyText,
+      });
+      if (!times) {
+        times = parseMaintenanceTimes(bodyText);
+      }
+      const { start_at, end_at } = times;
+
+      console.log(
+        `[maintenance] id=${id} → start_at="${start_at ?? "not found"}" end_at="${end_at ?? "not found"}"`,
+      );
 
       rows.push({
         id,
         name,
         start_at,
         end_at,
-        url: buildMaintenanceUrl(id, name),
-        source_index: sourceIndexMap.get(id) ?? null,
+        url: buildMaintenanceUrl(id),
+        live_date: detail.liveDate ?? null,
       });
     } catch (err) {
-      console.error(`[maintenance] Failed to process id=${item.id}:`, err.message);
+      console.error(
+        `[maintenance] Failed to process id=${item.id}:`,
+        err.message,
+      );
     }
   }
 
   // 5. Supabase에 upsert
   await upsertMaintenance(rows);
 
-  console.log('[maintenance] Done.');
+  console.log("[maintenance] Done.");
 }

@@ -2,7 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 
 const TABLE = "events_v2";
 const NON_EVENTS_TABLE = "non_events_v2";
-const MAINTENANCE_TABLE = "maintenance";
+const MAINTENANCE_TABLE = "maintenance_v2";
 
 let _client = null;
 
@@ -150,28 +150,8 @@ export async function getExistingMaintenanceIds(ids) {
 }
 
 /**
- * 현재 maintenance 테이블의 source_index 최댓값을 반환한다. 데이터 없으면 0 반환.
- * @returns {Promise<number>}
- */
-export async function getMaxMaintenanceSourceIndex() {
-  try {
-    const client = getClient();
-    const { data, error } = await client
-      .from(MAINTENANCE_TABLE)
-      .select("source_index")
-      .order("source_index", { ascending: false })
-      .limit(1);
-    if (error) throw error;
-    return data?.[0]?.source_index ?? 0;
-  } catch (err) {
-    console.error("[db] getMaxMaintenanceSourceIndex error:", err.message);
-    throw err;
-  }
-}
-
-/**
- * maintenance 행 배열을 Supabase에 upsert한다. PK(id) 기준 중복 방지.
- * @param {Array<{id: string, name: string, start_at: string|null, end_at: string|null, url: string, source_index: number|null}>} rows
+ * maintenance_v2 행 배열을 Supabase에 upsert한다. PK(id) 기준 중복 방지.
+ * @param {Array<{id: string, name: string, start_at: string|null, end_at: string|null, url: string, live_date: string|null}>} rows
  * @returns {Promise<void>}
  */
 export async function upsertMaintenance(rows) {
