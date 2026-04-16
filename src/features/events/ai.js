@@ -119,13 +119,13 @@ export async function generateEventSummaryWithAI({ name, liveDate, content }) {
       typeof parsed.summary !== "string" ||
       typeof parsed.translation !== "string"
     ) {
-      console.error("[ai] invalid summary JSON shape:", parsed);
+      console.error("[events | ai] invalid summary JSON shape:", parsed);
       return null;
     }
 
-    return `## 요약\n\n${parsed.summary}\n\n## 전체 번역\n\n${parsed.translation}`;
+    return `## 요약\n\n${parsed.summary}\n\n---\n\n## 전체 번역\n\n${parsed.translation}`;
   } catch (err) {
-    console.error("[ai] summary GPT call failed:", err.message);
+    console.error("[events | ai] summary AI call failed:", err.message);
     return null;
   }
 }
@@ -152,7 +152,7 @@ export async function extractEventPeriodWithAI({ liveDate, content }) {
 
     if (!parsed.valid) {
       console.log(
-        `[ai] invalid event period: ${parsed.reason ?? "unknown reason"}`,
+        `[events | ai] invalid event period: ${parsed.reason ?? "unknown reason"}`,
       );
       return null;
     }
@@ -161,7 +161,7 @@ export async function extractEventPeriodWithAI({ liveDate, content }) {
       typeof parsed.start_at !== "string" ||
       typeof parsed.end_at !== "string"
     ) {
-      console.error("[ai] invalid JSON shape:", parsed);
+      console.error("[events | ai] invalid JSON shape:", parsed);
       return null;
     }
 
@@ -170,7 +170,7 @@ export async function extractEventPeriodWithAI({ liveDate, content }) {
       end_at: parsed.end_at,
     };
   } catch (err) {
-    console.error("[ai] GPT call failed:", err.message);
+    console.error("[events | ai] AI call failed:", err.message);
     return null;
   }
 }

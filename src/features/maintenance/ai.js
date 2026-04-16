@@ -46,7 +46,7 @@ export async function extractMaintenanceTimesWithAI({ liveDate, content }) {
 
     if (!parsed.valid) {
       console.log(
-        `[ai] invalid maintenance times: ${parsed.reason ?? "unknown reason"}`,
+        `[maintenance | ai] invalid maintenance times: ${parsed.reason ?? "unknown reason"}`,
       );
       return null;
     }
@@ -55,7 +55,10 @@ export async function extractMaintenanceTimesWithAI({ liveDate, content }) {
       typeof parsed.start_at !== "string" ||
       typeof parsed.end_at !== "string"
     ) {
-      console.error("[ai] invalid maintenance JSON shape:", parsed);
+      console.error(
+        "[maintenance | ai] invalid maintenance JSON shape:",
+        parsed,
+      );
       return null;
     }
 
@@ -64,7 +67,7 @@ export async function extractMaintenanceTimesWithAI({ liveDate, content }) {
       end_at: parsed.end_at,
     };
   } catch (err) {
-    console.error("[ai] maintenance AI call failed:", err.message);
+    console.error("[maintenance | ai] AI call failed:", err.message);
     return null;
   }
 }

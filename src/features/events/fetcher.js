@@ -1,5 +1,4 @@
-const CMS_API_URL = "https://g.nexonstatic.com/maplestory/cms/v1/news";
-const EVENT_LIMIT = 20;
+import { CMS_API_URL, EVENT_LIMIT } from "../../lib/constants.js";
 
 function isEligibleEventItem(item) {
   const isEvent = item.category === "events";
@@ -8,7 +7,7 @@ function isEligibleEventItem(item) {
 }
 
 /**
- * Nexon 뉴스 목록 API에서 GMS 이벤트 대상 상위 20개를 반환한다.
+ * Nexon 뉴스 목록 API에서 GMS 이벤트 상위 EVENT_LIMIT개를 반환한다.
  * @returns {Promise<Array<{id: string, [key: string]: any}>>}
  */
 export async function fetchEventsList() {
@@ -16,7 +15,7 @@ export async function fetchEventsList() {
     const res = await fetch(CMS_API_URL);
     if (!res.ok) {
       throw new Error(
-        `Event list fetch failed: ${res.status} ${res.statusText}`,
+        `Events list fetch failed: ${res.status} ${res.statusText}`,
       );
     }
 
@@ -26,12 +25,12 @@ export async function fetchEventsList() {
     const events = items.filter(isEligibleEventItem).slice(0, EVENT_LIMIT);
 
     console.log(
-      `[fetcher] Fetched ${items.length} news items, ${events.length} event items`,
+      `[events | fetcher] fetched ${items.length} items, ${events.length} filtered`,
     );
 
     return events;
   } catch (err) {
-    console.error("[fetcher] fetchEventList error:", err.message);
+    console.error("[events | fetcher] fetchEventsList error:", err.message);
     throw err;
   }
 }

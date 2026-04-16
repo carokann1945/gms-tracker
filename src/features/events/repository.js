@@ -1,7 +1,5 @@
 import { getClient } from "../../lib/supabase.js";
-
-const TABLE = "events_v2";
-const NON_EVENTS_TABLE = "non_events_v2";
+import { TABLE, NON_EVENTS_TABLE } from "../../lib/constants.js";
 
 /**
  * 주어진 id 배열 중 events_v2에 이미 존재하는 항목을 Map<id, name>으로 반환한다.
@@ -24,11 +22,14 @@ export async function getExistingEventMap(ids) {
       (data ?? []).map((row) => [String(row.id), row.name ?? ""]),
     );
     console.log(
-      `[db] ${existing.size} of ${ids.length} ids already exist in events_v2`,
+      `[events | repository] ${existing.size} of ${ids.length} ids already exist in ${TABLE}`,
     );
     return existing;
   } catch (err) {
-    console.error("[db] getExistingEventMap error:", err.message);
+    console.error(
+      "[events | repository] getExistingEventMap error:",
+      err.message,
+    );
     throw err;
   }
 }
@@ -48,12 +49,15 @@ export async function getExistingNonEventIds(ids) {
 
     const existing = new Set((data ?? []).map((row) => String(row.id)));
     console.log(
-      `[db] ${existing.size} of ${ids.length} ids already exist in non_events_v2`,
+      `[events | repository] ${existing.size} of ${ids.length} ids already exist in ${NON_EVENTS_TABLE}`,
     );
 
     return existing;
   } catch (err) {
-    console.error("[db] getExistingNonEventIds error:", err.message);
+    console.error(
+      "[events | repository] getExistingNonEventIds error:",
+      err.message,
+    );
     throw err;
   }
 }
@@ -69,7 +73,7 @@ export async function getProcessed(ids) {
 
 export async function upsertEvents(rows) {
   if (!rows.length) {
-    console.log("[db] No rows to upsert");
+    console.log("[events | repository] no rows to upsert");
     return;
   }
 
@@ -81,9 +85,9 @@ export async function upsertEvents(rows) {
 
     if (error) throw error;
 
-    console.log(`[db] Upserted ${rows.length} rows`);
+    console.log(`[events | repository] upserted ${rows.length} rows`);
   } catch (err) {
-    console.error("[db] upsertEvents error:", err.message);
+    console.error("[events | repository] upsertEvents error:", err.message);
     throw err;
   }
 }
@@ -94,7 +98,7 @@ export async function upsertEvents(rows) {
  */
 export async function upsertNonEvents(rows) {
   if (!rows.length) {
-    console.log("[db] No non-event rows to upsert");
+    console.log("[events | repository] no non-event rows to upsert");
     return;
   }
 
@@ -106,9 +110,9 @@ export async function upsertNonEvents(rows) {
 
     if (error) throw error;
 
-    console.log(`[db] Upserted ${rows.length} non-event rows`);
+    console.log(`[events | repository] upserted ${rows.length} non-event rows`);
   } catch (err) {
-    console.error("[db] upsertNonEvents error:", err.message);
+    console.error("[events | repository] upsertNonEvents error:", err.message);
     throw err;
   }
 }

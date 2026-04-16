@@ -1,6 +1,5 @@
 import { getClient } from "../../lib/supabase.js";
-
-const MAINTENANCE_TABLE = "maintenance_v2";
+import { MAINTENANCE_TABLE } from "../../lib/constants.js";
 
 /**
  * 주어진 id 배열 중 maintenance 테이블에 이미 존재하는 id를 Set으로 반환한다.
@@ -19,13 +18,16 @@ export async function getExistingMaintenanceIds(ids) {
 
     if (error) throw error;
 
-    const existing = new Set((data ?? []).map((row) => row.id));
+    const existing = new Set((data ?? []).map((row) => String(row.id)));
     console.log(
-      `[db] ${existing.size} of ${ids.length} maintenance ids already exist in DB`,
+      `[maintenance | repository] ${existing.size} of ${ids.length} ids already exist in ${MAINTENANCE_TABLE}`,
     );
     return existing;
   } catch (err) {
-    console.error("[db] getExistingMaintenanceIds error:", err.message);
+    console.error(
+      "[maintenance | repository] getExistingMaintenanceIds error:",
+      err.message,
+    );
     throw err;
   }
 }
@@ -37,7 +39,7 @@ export async function getExistingMaintenanceIds(ids) {
  */
 export async function upsertMaintenance(rows) {
   if (!rows.length) {
-    console.log("[db] No maintenance rows to upsert");
+    console.log("[maintenance | repository] no rows to upsert");
     return;
   }
 
@@ -49,9 +51,12 @@ export async function upsertMaintenance(rows) {
 
     if (error) throw error;
 
-    console.log(`[db] Upserted ${rows.length} maintenance rows`);
+    console.log(`[maintenance | repository] upserted ${rows.length} rows`);
   } catch (err) {
-    console.error("[db] upsertMaintenance error:", err.message);
+    console.error(
+      "[maintenance | repository] upsertMaintenance error:",
+      err.message,
+    );
     throw err;
   }
 }

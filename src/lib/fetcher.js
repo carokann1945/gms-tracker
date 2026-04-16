@@ -1,5 +1,4 @@
-const NEXON_BASE = "https://g.nexonstatic.com";
-const CMS_API_URL = "https://g.nexonstatic.com/maplestory/cms/v1/news";
+import { NEXON_BASE, CMS_API_URL } from "./constants.js";
 
 export function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -11,7 +10,7 @@ export function toAbsoluteCmsUrl(url) {
   return `${NEXON_BASE}${url.startsWith("/") ? "" : "/"}${url}`;
 }
 
-export async function fetchEventDetail(id) {
+export async function fetchDetail(id) {
   try {
     const res = await fetch(`${CMS_API_URL}/${id}`);
     if (!res.ok)
@@ -25,9 +24,10 @@ export async function fetchEventDetail(id) {
       imageThumbnail: toAbsoluteCmsUrl(
         data.imageThumbnail ?? data.image_thumbnail ?? null,
       ),
+      category: data.category ?? null,
     };
   } catch (err) {
-    console.error(`[fetcher] fetchEventDetail error (id=${id}):`, err.message);
+    console.error(`[fetcher] fetchDetail error (id=${id}):`, err.message);
     return null;
   }
 }

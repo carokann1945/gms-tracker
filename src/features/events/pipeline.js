@@ -1,14 +1,12 @@
 import { fetchEventsList } from "./fetcher.js";
 import { getProcessed, upsertEvents, upsertNonEvents } from "./repository.js";
-import { extractBodyImageUrls, buildGmsUrl } from "./parser.js";
+import { extractBodyImageUrls, buildEventsUrl } from "./parser.js";
 import { extractEventPeriodWithAI, generateEventSummaryWithAI } from "./ai.js";
 import { isHotWeekNotice, parseHotWeekDates } from "./hotWeek.js";
 import { extractBodyText } from "../../lib/parser.js";
-import { fetchEventDetail, sleep } from "../../lib/fetcher.js";
+import { fetchDetail, sleep } from "../../lib/fetcher.js";
 import { extractTextFromImage } from "../../lib/ocr.js";
-
-const THROTTLE_MS = 500;
-const OCR_LIMIT = 30;
+import { THROTTLE_MS, OCR_LIMIT } from "../../lib/constants.js";
 
 async function extractEventPeriod({ liveDate, name, bodyHtml, bodyText }) {
   const hotWeek = isHotWeekNotice(name, bodyText);
@@ -61,7 +59,7 @@ export async function runEventsPipeline() {
   const candidates = await fetchEventsList();
 
   if (!candidates.length) {
-    console.log("[events] No event items found.");
+    console.log("[events | pipeline] no event items found.");
     return;
   }
 
@@ -75,11 +73,11 @@ export async function runEventsPipeline() {
   });
 
   if (!newItems.length) {
-    console.log("[events] No new items to process.");
+    console.log("[events | pipeline] no new items to process.");
     return;
   }
 
-  console.log(`[events] ${newItems.length} new item(s) to process`);
+  console.log(`[events | pipeline] ${newItems.length} new items to process`);
 
   const eventRows = [];
   const nonEventRows = [];
@@ -87,7 +85,7 @@ export async function runEventsPipeline() {
   for (const item of newItems) {
     await sleep(THROTTLE_MS);
 
-    const detail = await fetchEventDetail(item.id);
+    const detail = await fetchDetail(item.id);
     if (!detail) continue;
 
     const id = String(detail.id);
@@ -105,7 +103,7 @@ export async function runEventsPipeline() {
     });
 
     if (parsed?.start_at && parsed?.end_at) {
-      const gms_url = buildGmsUrl(id, name);
+      const gms_url = buildEventsUrl(id);
 
       const summary = parsed.summary_input
         ? await generateEventSummaryWithAI({
@@ -127,7 +125,7 @@ export async function runEventsPipeline() {
       });
 
       console.log(
-        `[events] id=${id} → start_at="${parsed.start_at}" end_at="${parsed.end_at}"`,
+        `[events | pipeline] id=${id} → start_at="${parsed.start_at}" end_at="${parsed.end_at}"`,
       );
       continue;
     }
@@ -137,7 +135,7 @@ export async function runEventsPipeline() {
       name,
     });
 
-    console.log(`[events] id=${id} → saved as non-event`);
+    console.log(`[events | pipeline] id=${id} → saved as non-event`);
   }
 
   await upsertEvents(eventRows);
