@@ -1,4 +1,4 @@
-import { gemini, openai, useGemini, GEMINI_MODEL } from "../../lib/ai.js";
+import { gemini, GEMINI_MODEL } from "../../lib/ai.js";
 
 function buildMaintenancePeriodPrompt({ liveDate, content }) {
   return `
@@ -28,37 +28,18 @@ export async function extractMaintenanceTimesWithAI({ liveDate, content }) {
   if (!liveDate || !content) return null;
 
   try {
-    let result;
-
-    if (useGemini) {
-      const response = await gemini.models.generateContent({
-        model: GEMINI_MODEL,
-        contents: buildMaintenancePeriodPrompt({ liveDate, content }),
-        config: {
-          systemInstruction: "Return JSON only.",
-          temperature: 0,
-          maxOutputTokens: 65536,
-          responseMimeType: "application/json",
-        },
-      });
-      result = response.text;
-    } else {
-      const response = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        response_format: { type: "json_object" },
+    const response = await gemini.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: buildMaintenancePeriodPrompt({ liveDate, content }),
+      config: {
+        systemInstruction: "Return JSON only.",
         temperature: 0,
-        max_tokens: 1000,
-        messages: [
-          { role: "system", content: "Return JSON only." },
-          {
-            role: "user",
-            content: buildMaintenancePeriodPrompt({ liveDate, content }),
-          },
-        ],
-      });
-      result = response.choices[0]?.message?.content?.trim();
-    }
+        maxOutputTokens: 65536,
+        responseMimeType: "application/json",
+      },
+    });
 
+    const result = response.text;
     if (!result) return null;
 
     const parsed = JSON.parse(result);

@@ -1,5 +1,5 @@
 import { Type } from "@google/genai";
-import { gemini, openai, useGemini, GEMINI_MODEL } from "../../lib/ai.js";
+import { gemini, GEMINI_MODEL } from "../../lib/ai.js";
 
 function buildEventSummaryPrompt({ name, liveDate, content }) {
   return `
@@ -91,59 +91,25 @@ export async function generateEventSummaryWithAI({ name, liveDate, content }) {
   if (!name || !content) return null;
 
   try {
-    let result;
-
-    if (useGemini) {
-      const response = await gemini.models.generateContent({
-        model: GEMINI_MODEL,
-        contents: buildEventSummaryPrompt({ name, liveDate, content }),
-        config: {
-          systemInstruction: "Return JSON only.",
-          temperature: 0.2,
-          maxOutputTokens: 65536,
-          responseMimeType: "application/json",
-          responseJsonSchema: {
-            type: Type.OBJECT,
-            properties: {
-              summary: { type: Type.STRING },
-              translation: { type: Type.STRING },
-            },
-            required: ["summary", "translation"],
-          },
-        },
-      });
-      result = response.text;
-    } else {
-      const response = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        response_format: {
-          type: "json_schema",
-          json_schema: {
-            name: "event_summary",
-            strict: true,
-            schema: {
-              type: "object",
-              properties: {
-                summary: { type: "string" },
-                translation: { type: "string" },
-              },
-              required: ["summary", "translation"],
-              additionalProperties: false,
-            },
-          },
-        },
+    const response = await gemini.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: buildEventSummaryPrompt({ name, liveDate, content }),
+      config: {
+        systemInstruction: "Return JSON only.",
         temperature: 0.2,
-        max_tokens: 16384,
-        messages: [
-          { role: "system", content: "Return JSON only." },
-          {
-            role: "user",
-            content: buildEventSummaryPrompt({ name, liveDate, content }),
+        maxOutputTokens: 65536,
+        responseMimeType: "application/json",
+        responseJsonSchema: {
+          type: Type.OBJECT,
+          properties: {
+            summary: { type: Type.STRING },
+            translation: { type: Type.STRING },
           },
-        ],
-      });
-      result = response.choices[0]?.message?.content?.trim();
-    }
+          required: ["summary", "translation"],
+        },
+      },
+    });
+    const result = response.text;
 
     if (!result) return null;
 
@@ -168,36 +134,17 @@ export async function extractEventPeriodWithAI({ liveDate, content }) {
   if (!liveDate || !content) return null;
 
   try {
-    let result;
-
-    if (useGemini) {
-      const response = await gemini.models.generateContent({
-        model: GEMINI_MODEL,
-        contents: buildEventPeriodPrompt({ liveDate, content }),
-        config: {
-          systemInstruction: "Return JSON only.",
-          temperature: 0,
-          maxOutputTokens: 65536,
-          responseMimeType: "application/json",
-        },
-      });
-      result = response.text;
-    } else {
-      const response = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        response_format: { type: "json_object" },
+    const response = await gemini.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: buildEventPeriodPrompt({ liveDate, content }),
+      config: {
+        systemInstruction: "Return JSON only.",
         temperature: 0,
-        max_tokens: 1000,
-        messages: [
-          { role: "system", content: "Return JSON only." },
-          {
-            role: "user",
-            content: buildEventPeriodPrompt({ liveDate, content }),
-          },
-        ],
-      });
-      result = response.choices[0]?.message?.content?.trim();
-    }
+        maxOutputTokens: 65536,
+        responseMimeType: "application/json",
+      },
+    });
+    const result = response.text;
 
     if (!result) return null;
 

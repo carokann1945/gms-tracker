@@ -23,7 +23,7 @@
 | 패키지 매니저         | `pnpm`                      |
 | 뉴스 수집             | 내장 `fetch`, Nexon CMS API |
 | HTML 파싱             | `cheerio`                   |
-| 이벤트/점검 시간 추출 | OpenAI 또는 Gemini          |
+| 이벤트/점검 시간 추출 | Gemini                      |
 | OCR                   | Google Cloud Vision         |
 | 저장소                | Supabase                    |
 | 컨테이너              | Docker (`node:24-slim`)     |
@@ -93,14 +93,12 @@ docker run --rm --env-file .env gms-tracker
 
 현재 코드 기준으로 필요한 입력은 아래와 같습니다.
 
-| 변수                             | 필수 여부   | 설명                                             |
-| -------------------------------- | ----------- | ------------------------------------------------ |
-| `SUPABASE_URL`                   | 필수        | Supabase 프로젝트 URL                            |
-| `SUPABASE_SERVICE_ROLE_KEY`      | 필수        | Supabase 쓰기용 서비스 롤 키                     |
-| `GOOGLE_APPLICATION_CREDENTIALS` | 권장        | 이벤트 OCR fallback용 GCP 서비스 계정 JSON 경로  |
-| `OPENAI_API_KEY`                 | 조건부 필수 | `AI_PROVIDER=gemini`가 아닐 때 사용              |
-| `GEMINI_API_KEY`                 | 조건부 필수 | `AI_PROVIDER=gemini`일 때 사용                   |
-| `AI_PROVIDER`                    | 선택        | `gemini`면 Gemini, 그 외 값은 OpenAI 경로로 동작 |
+| 변수                             | 필수 여부 | 설명                                            |
+| -------------------------------- | --------- | ----------------------------------------------- |
+| `SUPABASE_URL`                   | 필수      | Supabase 프로젝트 URL                           |
+| `SUPABASE_SERVICE_ROLE_KEY`      | 필수      | Supabase 쓰기용 서비스 롤 키                    |
+| `GOOGLE_APPLICATION_CREDENTIALS` | 권장      | 이벤트 OCR fallback용 GCP 서비스 계정 JSON 경로 |
+| `GEMINI_API_KEY`                 | 필수      | 날짜 파싱, 한글 번역에 사용                     |
 
 ## 아키텍처
 
@@ -110,7 +108,7 @@ docker run --rm --env-file .env gms-tracker
 
 - `src/lib/fetcher.js`: `fetchEventDetail`, `sleep`
 - `src/lib/parser.js`: `extractBodyText`
-- `src/lib/ai.js`: OpenAI/Gemini 클라이언트 및 공용 설정
+- `src/lib/ai.js`: Gemini 클라이언트 및 공용 설정
 - `src/lib/supabase.js`: Supabase 클라이언트 생성
 - `src/lib/ocr.js`: Google Vision OCR 래퍼, 현재는 이벤트 파이프라인에서만 사용
 
@@ -152,7 +150,6 @@ docker run --rm --env-file .env gms-tracker
 세부 구현 포인트:
 
 - 점검 URL은 `https://www.nexon.com/maplestory/news/maintenance/{id}` 형태로 저장됩니다.
-- 점검 파이프라인도 이벤트와 같은 `AI_PROVIDER` 설정을 공유합니다.
 - 시간 파싱이 완전히 실패해도 현재 구현은 `start_at`, `end_at`이 `null`인 상태로 row를 저장할 수 있습니다.
 
 ## 저장 대상 테이블
