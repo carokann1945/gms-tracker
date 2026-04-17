@@ -94,6 +94,7 @@ export async function runEventsPipeline() {
     const bodyHtml = detail.body ?? "";
     const bodyText = extractBodyText(bodyHtml);
     const imageThumbnail = detail.imageThumbnail ?? null;
+    const isMSCW = detail.isMSCW;
 
     const parsed = await extractEventPeriod({
       liveDate,
@@ -122,6 +123,7 @@ export async function runEventsPipeline() {
         end_at: parsed.end_at,
         gms_url,
         summary,
+        is_mscw: isMSCW,
       });
 
       console.log(

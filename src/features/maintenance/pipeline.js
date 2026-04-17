@@ -59,6 +59,7 @@ export async function runMaintenancePipeline() {
       const id = String(detail.id);
       const name = detail.name;
       const bodyText = extractMaintenanceBodyText(detail.body);
+      const isMSCW = detail.isMSCW;
 
       // LLM 1차 파싱, 실패 시 regex fallback
       let times = await extractMaintenanceTimesWithAI({
@@ -81,6 +82,7 @@ export async function runMaintenancePipeline() {
         end_at,
         url: buildMaintenanceUrl(id),
         live_date: detail.liveDate ?? null,
+        is_mscw: isMSCW,
       });
     } catch (err) {
       console.error(

@@ -11,7 +11,7 @@ export const NEXON_BASE = "https://g.nexonstatic.com";
 export const EVENT_LIMIT = 20;
 
 // 한번에 처리할 최대 뉴스 갯수
-export const NEWS_LIMIT = 10;
+export const NEWS_LIMIT = 15;
 
 // news OCR fallback을 시도할 본문 최소 길이
 export const NEWS_OCR_MIN_TEXT_LENGTH = 100;

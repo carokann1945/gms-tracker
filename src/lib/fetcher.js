@@ -25,6 +25,7 @@ export async function fetchDetail(id) {
         data.imageThumbnail ?? data.image_thumbnail ?? null,
       ),
       category: data.category ?? null,
+      isMSCW: data.isMSCW ?? null,
     };
   } catch (err) {
     console.error(`[fetcher] fetchDetail error (id=${id}):`, err.message);

@@ -90,6 +90,7 @@ export async function runNewsPipeline() {
     const category = detail.category ?? "update";
     const url = buildNewsUrl(id, category);
     const content = await resolveNewsContent({ bodyHtml, bodyText });
+    const isMSCW = detail.isMSCW;
 
     // 번역본 생성
     const translation = await generateNewsTranslationWithAI({
@@ -105,6 +106,7 @@ export async function runNewsPipeline() {
       image_thumbnail: imageThumbnail,
       url,
       translation,
+      is_mscw: isMSCW,
     });
 
     console.log(`[news | pipeline] id=${id} : saved`);
