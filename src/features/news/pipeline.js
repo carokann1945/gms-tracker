@@ -1,5 +1,5 @@
 import { fetchNewsList } from "./fetcher.js";
-import { getExistingNewsIds, upsertNews } from "./repository.js";
+import { getExistingNewsMap, upsertNews } from "./repository.js";
 import { isNewsItem, extractBodyImageUrls, buildNewsUrl } from "./parser.js";
 import { generateNewsTranslationWithAI } from "./ai.js";
 import { extractBodyText } from "../../lib/parser.js";
@@ -10,6 +10,15 @@ import {
   OCR_LIMIT,
   NEWS_OCR_MIN_TEXT_LENGTH,
 } from "../../lib/constants.js";
+
+function isSameLiveDate(a, b) {
+  if (a == null && b == null) return true;
+  if (a == null || b == null) return false;
+  const ta = new Date(a).getTime();
+  const tb = new Date(b).getTime();
+  if (Number.isNaN(ta) || Number.isNaN(tb)) return a === b;
+  return ta === tb;
+}
 
 async function resolveNewsContent({ bodyHtml, bodyText }) {
   const normalizedBodyText = bodyText.trim();
@@ -58,12 +67,15 @@ export async function runNewsPipeline() {
     return;
   }
 
-  // DB에 이미 있는 ID 확인 -> 신규 항목만 추출
+  // DB에 이미 있는 항목 조회 -> 신규/이름 변경/liveDate 변경 시에만 재처리
   const ids = candidates.map((item) => String(item.id));
-  const existingIds = await getExistingNewsIds(ids);
-  const newItems = candidates.filter(
-    (item) => !existingIds.has(String(item.id)),
-  );
+  const existingMap = await getExistingNewsMap(ids);
+  const newItems = candidates.filter((item) => {
+    const stored = existingMap.get(String(item.id));
+    if (!stored) return true;
+    if (stored.name !== item.name) return true;
+    return !isSameLiveDate(stored.live_date, item.liveDate);
+  });
 
   if (!newItems.length) {
     console.log("[news | pipeline] no new items to process.");
